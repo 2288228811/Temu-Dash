@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geometry Dash</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0533;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: 'Arial Black', sans-serif;
+  }
+  #ui {
+    color: #fff;
+    font-size: 20px;
+    margin-bottom: 8px;
+    text-shadow: 0 0 10px #f0c;
+    letter-spacing: 2px;
+  }
+  canvas {
+    border: 3px solid #f0c;
+    box-shadow: 0 0 30px #f0c, 0 0 60px #80f;
+    border-radius: 4px;
+    display: block;
+    max-width: 100%;
+  }
+  #msg {
+    color: #fff;
+    font-size: 18px;
+    margin-top: 10px;
+    text-shadow: 0 0 8px #0ff;
+    letter-spacing: 1px;
+    min-height: 24px;
+  }
+</style>
+</head>
+<body>
+<div id="ui">TEMU DASH &nbsp;|&nbsp; <span id="score">0</span></div>
+<canvas id="c" width="800" height="300"></canvas>
+<div id="msg">Tippe / Leertaste zum Starten</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const msgEl = document.getElementById('msg');
+// ---------- Sounds (hier Dateinamen eintragen) ----------
+const bgMusic = new Audio('Sound5.mp3');
+bgMusic.loop = true;
+
+function startBgMusic() { bgMusic.play().catch(() => {}); }
+function pauseBgMusic() { bgMusic.pause(); }
+const DEATH_SOUNDS = ['Sound1.mp3', 'Sound2.mp3', 'Sound3.mp3'].map(f => new Audio(f));
+const shipSound = new Audio('Sound4.mp3');
+shipSound.loop = true;
+
+function playDeathSound() {
+  const s = DEATH_SOUNDS[Math.floor(Math.random() * DEATH_SOUNDS.length)];
+  s.currentTime = 0;
+  s.play().catch(() => {});
+}
+function startShipSound() {
+  shipSound.currentTime = 0;
+  shipSound.play().catch(() => {});
+}
+function stopShipSound() {
+  shipSound.pause();
+  shipSound.currentTime = 0;
+}
+
+// ---------- Wave-Video (Hintergrund im Wave-Modus) ----------
+const VIDEO_SOUND = true;    // true = Ton des Videos während Wave an
+const WAVE_SLOPE = 0.85;     // Steigung der Wave (1 = 45°)
+const WAVE_TIME = 0.4;       // Zeitlupe in der Wave (1 = normal, kleiner = langsamer)
+let timeScale = 1;
+const waveVideo = document.createElement('video');
+waveVideo.src = 'Video1.mp4';
+waveVideo.loop = true;
+waveVideo.muted = !VIDEO_SOUND;
+waveVideo.playsInline = true;
+waveVideo.preload = 'auto';
+waveVideo.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;';
+document.body.appendChild(waveVideo);
+
+function startWaveVideo() {
+  try { waveVideo.currentTime = 0; } catch (e) {}
+  waveVideo.playbackRate = WAVE_TIME;
+  waveVideo.muted = !VIDEO_SOUND;
+  waveVideo.play().catch(() => {
+    // Browser blockt Ton: stumm weiterspielen, damit wenigstens das Bild läuft
+    waveVideo.muted = true;
+    waveVideo.play().catch(() => {});
+  });
+}
+function stopWaveVideo() {
+  waveVideo.pause();
+}
+let waveFade = 0;      // 0..1 Einblendung des Videos
+let waveTrail = [];
+
+const W = canvas.width, H = canvas.height;
+const GROUND = H - 50;
+const GRAVITY = 0.8;
+const JUMP = -13;
+const PAD_JUMP = -16.5;
+const SPEED_INIT = 8;
+const TILE = 40;
+const ZONE_LENGTH = 1500; // Frames pro Zone
+const JUMP_DELAY = 1;     // Verzögerung beim Sprung in Frames (60 Frames = 1 Sekunde), 0 = aus
+
+let state = 'idle'; // idle, playing, dead
+let score = 0;
+let speed = SPEED_INIT;
+let frame = 0;
+let bgOffset = 0;
+let jumpBuf = 0;
+let jumpDelay = 0;        // läuft ab, dann startet der Sprung
+let orbBuf = 0;           // Klick-Fenster für Sprung-Orbs
+let ufoTap = false;       // UFO: Tipp = Hüpfer
+let gravDir = 1;          // Ball: 1 = Schwerkraft nach unten, -1 = nach oben
+let holding = false;      // Taste/Finger gedrückt (für Flugzeug / Wave)
+let mode = 'cube';        // 'cube', 'ship', 'wave', 'ball' oder 'ufo'
+let nextShip = 350;       // ab diesem Frame kommt der nächste Spezial-Abschnitt
+let specialIdx = 0;       // welcher Spezial-Abschnitt als Nächstes kommt
+let SPECIALS = ['wave', 'ship', 'ball', 'ufo'];
+
+function shuffleSpecials() {
+    for (let i = SPECIALS.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [SPECIALS[i], SPECIALS[j]] = [SPECIALS[j], SPECIALS[i]];
+    }
+}
+let banner = 0, bannerText = '';
+
+// ---------- Zonen / Themes ----------
+const THEMES = [
+  { name: 'Talahon Stadt',      deco:'city',      skyTop:[13,0,38],  skyBot:[26,0,69],  ground:[42,0,94],  accent:[255,0,204], spike:[255,34,85],  block:[204,85,0],  edge:[255,170,68] },
+  { name: 'Adams Kühlschrank',  deco:'mountains', skyTop:[0,14,36],  skyBot:[0,42,84],  ground:[0,52,92],  accent:[0,229,255], spike:[255,60,120], block:[0,110,160], edge:[110,225,255] },
+  { name: 'Maxims Mikrowelle',  deco:'city',      skyTop:[30,0,0],   skyBot:[86,12,0],  ground:[78,16,0],  accent:[255,120,0], spike:[255,225,80], block:[150,40,0],  edge:[255,150,70] },
+  { name: 'Adams ATOMFURZ',     deco:'mountains', skyTop:[0,26,10],  skyBot:[0,62,32],  ground:[0,72,36],  accent:[0,255,120], spike:[255,0,130],  block:[30,120,50], edge:[150,255,170] },
+  { name: 'Dönerbude',          deco:'city',      skyTop:[28,10,0],  skyBot:[80,40,0],  ground:[90,50,0],  accent:[255,200,0], spike:[210,0,50],   block:[140,70,10], edge:[255,210,110] },
+  { name: 'Gefrierfach',        deco:'snow',      skyTop:[0,20,40],  skyBot:[40,90,130],ground:[40,100,140],accent:[200,255,255],spike:[255,80,160], block:[60,130,190],edge:[220,250,255] },
+  { name: 'Lila Disco',         deco:'disco',     skyTop:[20,0,40],  skyBot:[70,0,90],  ground:[60,0,80],  accent:[180,80,255],spike:[0,255,200],  block:[100,30,160],edge:[210,150,255] },
+];
+const KEYS = ['skyTop','skyBot','ground','accent','spike','block','edge'];
+let themeIdx = 0;
+let cur = {};
+function snapTheme() { KEYS.forEach(k => cur[k] = [...THEMES[themeIdx % THEMES.length][k]]); }
+snapTheme();
+function updateTheme() {
+  const t = THEMES[themeIdx % THEMES.length];
+  KEYS.forEach(k => { for (let i = 0; i < 3; i++) cur[k][i] += (t[k][i] - cur[k][i]) * 0.02; });
+}
+const rgb = (c, a = 1) => `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+
+// ---------- Spieler ----------
+let player = { x: 100, y: GROUND - TILE, w: TILE - 4, h: TILE - 4, vy: 0, onGround: false, angle: 0 };
+
+// ---------- Welt ----------
+let obstacles = [];
+let spawnDist = 0;
+let spawnGap = 400;
+let particles = [];
+
+let stars = Array.from({length: 60}, () => ({
+  x: Math.random() * W,
+  y: Math.random() * (GROUND - 60),
+  r: Math.random() * 2 + 0.5,
+  speed: Math.random() * 0.5 + 0.3
+}));
+
+// Hintergrund-Ebenen (periodisch, Länge 1600)
+const PERIOD = 1600;
+const mountains = [];
+for (let x = 0; x < PERIOD; x += 160 + Math.random() * 80) {
+  mountains.push({ x, w: 200 + Math.random() * 160, h: 60 + Math.random() * 90 });
+}
+const buildings = [];
+for (let x = 0; x < PERIOD; ) {
+  const w = 30 + Math.random() * 40;
+  buildings.push({ x, w, h: 30 + Math.random() * 90, win: Math.random() });
+  x += w + 4 + Math.random() * 10;
+}
+
+const PLAYER_COLORS = ['#00f5ff','#ff00cc','#ffe600','#00ff88'];
+let colorIdx = 0;
+let playerColor = PLAYER_COLORS[colorIdx];
+
+// ---------- Input ----------
+function jump() {
+  if (state === 'idle') { startGame(); return; }
+  if (state === 'dead') { resetGame(); return; }
+  if (mode === 'ship' || mode === 'wave') return;
+  if (mode === 'ball') { jumpBuf = 9; return; }
+  if (mode === 'ufo') { ufoTap = true; return; }
+  orbBuf = 10; // Orb-Klick (wirkt nur, wenn gerade ein Orb berührt wird)
+  if (jumpDelay === 0) jumpDelay = Math.max(1, JUMP_DELAY);
+}
+
+function startGame() {
+  state = 'playing';
+  msgEl.textContent = '';
+}
+
+function resetGame() {
+  state = 'playing';
+  score = 0;
+  speed = SPEED_INIT;
+  frame = 0;
+  obstacles = [];
+  particles = [];
+  spawnDist = 0;
+  spawnGap = 400;
+  jumpBuf = 0;
+  jumpDelay = 0;
+  orbBuf = 0;
+  ufoTap = false;
+  gravDir = 1;
+  mode = 'cube';
+  specialIdx = 0;
+  stopWaveVideo();
+  waveFade = 0;
+  waveTrail = [];
+  nextShip = 900;
+  timeScale = 1;
+  banner = 0;
+  player.w = TILE - 4;
+  player.h = TILE - 4;
+  themeIdx = 0;
+  snapTheme();
+  player.y = GROUND - TILE;
+  player.vy = 0;
+  player.onGround = false;
+  player.angle = 0;
+  colorIdx = 0;
+  playerColor = PLAYER_COLORS[colorIdx];
+  msgEl.textContent = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') {
+    e.preventDefault();
+    holding = true;
+    // Ball & UFO: gehaltene Taste soll nicht dauernd auslösen
+    if (e.repeat && (mode === 'ball' || mode === 'ufo')) return;
+    jump();
+  }
+});
+document.addEventListener('keyup', e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') holding = false;
+});
+canvas.addEventListener('mousedown', () => { holding = true; jump(); });
+document.addEventListener('mouseup', () => { holding = false; });
+document.body.addEventListener('touchstart', e => { e.preventDefault(); holding = true; jump(); }, {passive: false});
+document.addEventListener('touchend', () => { holding = false; });
+document.addEventListener('touchcancel', () => { holding = false; });
+
+// ---------- Hindernis-Bausteine ----------
+const S   = x => obstacles.push({ type:'spike', x, w:36, h:40, y:GROUND-40 });
+const CS  = x => obstacles.push({ type:'cspike', x, w:36, h:40, y:6 });
+const B   = (x, t) => obstacles.push({ type:'block', x, w:TILE, h:TILE*t, y:GROUND-TILE*t, solid:true });
+const PL  = (x, w, hh) => obstacles.push({ type:'platform', x, w, h:16, y:GROUND-hh, solid:true });
+const PIT = (x, w) => obstacles.push({ type:'pit', x, w, h:0, y:GROUND });
+const PAD = x => obstacles.push({ type:'pad', x, w:40, h:10, y:GROUND-10, used:false });
+const SAW = (cx, cy, r) => obstacles.push({ type:'saw', x:cx-r, y:cy-r, w:2*r, h:2*r, r });
+// Bewegliche Säge: pendelt senkrecht um cy (amp = Ausschlag, ph = Phase)
+const MSAW = (cx, cy, r, amp, ph) => obstacles.push({ type:'saw', x:cx-r, y:cy-r, w:2*r, h:2*r, r, by:cy-r, amp, ph });
+// Sprung-Orb: in der Luft klicken, wenn man den Ring berührt
+const ORB = (cx, cy) => obstacles.push({ type:'orb', x:cx-30, y:cy-45, w:60, h:90, used:false });
+
+// Muster: min = ab welchem Frame verfügbar, f(x) gibt die Breite zurück
+const PATTERNS = [
+  { min:0,    f: x => { S(x); return 36; } },
+  { min:0,    f: x => { S(x); S(x+36); return 72; } },
+  { min:0,    f: x => { B(x, 1); return 40; } },
+  { min:0,    f: x => { B(x, 1.7); return 40; } },
+  { min:150, f: x => { S(x); S(x+220); S(x+440); return 476; } },
+  { min:250,  f: x => { const w = 130 + Math.random()*70; PIT(x, w); return w; } },
+  { min:300,  f: x => { B(x,1); B(x+40,2); B(x+80,2); B(x+120,1); S(x+250); return 286; } },
+  { min:400,  f: x => { B(x,1); B(x+40,2); B(x+80,1); S(x+200); return 236; } },
+{ min:450, f: x => {
+    B(x,2);
+    S(x+110);
+    B(x+280,2);
+    S(x+330);
+    return 366;
+} },
+  { min:500,  f: x => { SAW(x+22, GROUND-14, 22); return 44; } },
+  { min:600,  f: x => { MSAW(x+22, GROUND-80, 22, 55, 0); return 44; } },
+  { min:650,  f: x => { B(x,1); S(x+110); S(x+146); return 182; } },
+  { min:700,  f: x => { PL(x, 260, 80); for (let i = 0; i < 5; i++) S(x+40+i*36); return 260; } },
+  { min:800,  f: x => { S(x); S(x+36); S(x+72); return 108; } },
+  { min:850,  f: x => { MSAW(x+22, GROUND-80, 22, 55, 0); MSAW(x+170, GROUND-80, 22, 55, Math.PI); return 192; } },
+  { min:900,  f: x => { PIT(x, 300); B(x+70, 1); B(x+190, 1); return 300; } },
+  { min:1000, f: x => { for (let i = 0; i < 8; i++) S(x+i*36); ORB(x+144, GROUND-100); return 288; } },
+  { min:1100, f: x => { SAW(x+20, GROUND-85, 20); S(x+200); return 240; } },
+  { min:1200, f: x => { PIT(x, 380); ORB(x+180, GROUND-90); return 380; } },
+  { min:1300, f: x => { PAD(x); PIT(x+90, 320); return 410; } },
+  { min:1400, f: x => { S(x); SAW(x+150, GROUND-85, 20); MSAW(x+290, GROUND-80, 22, 55, 1.5); return 330; } },
+  { min:1500, f: x => { SAW(x+20, GROUND-85, 20); SAW(x+160, GROUND-85, 20); S(x+330); return 370; } },
+  { min:1700, f: x => { PAD(x); PL(x+150, 300, 150); return 470; } },
+  { min:1900, f: x => { PIT(x, 360); B(x+60, 1); B(x+160, 2); B(x+270, 1); return 360; } },
+  { min:2100, f: x => { for (let i = 0; i < 6; i++) S(x+i*36); PL(x+30, 160, 120); ORB(x+210, GROUND-110); PIT(x+260, 200); return 460; } },
+];
+let lastPattern = -1;
+
+// Gemeinsamer Anfang und Ende für Spezial-Abschnitte
+function portalIn(m) {
+  const x = W + 20;
+  obstacles.push({ type:'portal', mode:m, x, y:0, w:30, h:GROUND, used:false });
+  return x;
+}
+function portalOut(x, startX) {
+  x += 40;
+  obstacles.push({ type:'portal', mode:'cube', x, y:0, w:30, h:GROUND, used:false });
+  spawnGap = (x + 30 - startX) + 300;
+  spawnDist = 0;
+  nextShip = frame + 900 + Math.random() * 500;
+}
+
+// Flugzeug-Abschnitt: Portal rein, Säulen-Slalom, Portal raus
+function spawnShip() {
+  const startX = portalIn('ship');
+  let x = startX + 330;
+  let center = 120 + Math.random() * 60;
+  const n = 27 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < n; i++) {
+    if (Math.random() < 0.25) {
+      // Block mitten im Gang: drüber oder drunter fliegen
+      center = Math.max(100, Math.min(GROUND - 100, center + (Math.random() - 0.5) * 140));
+      obstacles.push({ type:'pillar', x, y:center - 35, w:40, h:70 });
+    } else {
+      const gap = Math.max(115, 160 - Math.floor(frame / 600) * 6) + Math.random() * 20;
+      center += (Math.random() - 0.5) * 140;
+      center = Math.max(gap / 2 + 20, Math.min(GROUND - gap / 2 - 20, center));
+      const top = center - gap / 2, bot = center + gap / 2;
+      obstacles.push({ type:'pillar', x, y:0, w:40, h:top });
+      obstacles.push({ type:'pillar', x, y:bot, w:40, h:GROUND - bot });
+    }
+    x += 260;
+  }
+  portalOut(x, startX);
+}
+
+// Wave-Abschnitt: Portal rein, Zickzack-Gang, Portal raus
+function spawnWave() {
+  const startX = portalIn('wave');
+  let x = startX + 330;
+  const colW = 20;
+  const step = colW * WAVE_SLOPE;
+  const baseGap = Math.max(120, 165 - Math.floor(frame / 600) * 5);
+  let center = GROUND / 2;
+  let dir = Math.random() < 0.5 ? -1 : 1;
+  let left = 4 + Math.floor(Math.random() * 5);
+  const n = 270 + Math.floor(Math.random() * 20);
+  for (let i = 0; i < n; i++) {
+    // Am Anfang ist der Gang weiter (Trichter)
+    const gap = baseGap + Math.max(0, 8 - i) * 18;
+    center += dir * step;
+    const lo = gap / 2 + 15, hi = GROUND - gap / 2 - 15;
+    if (center < lo) { center = lo; dir = 1; left = 5 + Math.floor(Math.random() * 6); }
+    if (center > hi) { center = hi; dir = -1; left = 5 + Math.floor(Math.random() * 6); }
+    left--;
+    if (left <= 0) { dir = -dir; left = 5 + Math.floor(Math.random() * 8); }
+    const top = center - gap / 2, bot = center + gap / 2;
+    obstacles.push({ type:'wcol', top:true,  x, y:0,   w:colW + 1, h:top });
+    obstacles.push({ type:'wcol', top:false, x, y:bot, w:colW + 1, h:GROUND - bot });
+    x += colW;
+  }
+  portalOut(x, startX);
+}
+
+// Ball-Abschnitt: Klick wechselt die Schwerkraft, Spikes am Boden und an der Decke
+function spawnBall() {
+  const startX = portalIn('ball');
+  let x = startX + 360;
+  const n = 14 + Math.floor(Math.random() * 5);
+  let side = Math.random() < 0.5 ? 1 : -1;
+  for (let i = 0; i < n; i++) {
+    side = Math.random() < 0.7 ? -side : side;
+    const cnt = 1 + Math.floor(Math.random() * 2);
+    for (let k = 0; k < cnt; k++) {
+      if (side > 0) S(x + k * 36); else CS(x + k * 36);
+    }
+    x += cnt * 36 + 340 + Math.random() * 90;
+  }
+  portalOut(x, startX);
+}
+
+// UFO-Abschnitt: jeder Tipp ist ein Hüpfer, Säulengang
+function spawnUfo() {
+  const startX = portalIn('ufo');
+  let x = startX + 330;
+  let center = GROUND / 2;
+  const n = 24 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < n; i++) {
+    const gap = Math.max(135, 190 - Math.floor(frame / 600) * 5) + Math.random() * 20;
+    center += (Math.random() - 0.5) * 110;
+    center = Math.max(gap / 2 + 20, Math.min(GROUND - gap / 2 - 20, center));
+    const top = center - gap / 2, bot = center + gap / 2;
+    obstacles.push({ type:'pillar', x, y:0, w:40, h:top });
+    obstacles.push({ type:'pillar', x, y:bot, w:40, h:GROUND - bot });
+    x += 270;
+  }
+  portalOut(x, startX);
+}
+
+function setMode(m) {
+  if (m === 'ship') startShipSound(); else stopShipSound();
+  const cy = player.y + player.h / 2;
+  mode = m;
+  gravDir = 1;
+  ufoTap = false;
+  if (m === 'ship') { player.w = 36; player.h = 22; player.angle = 0; }
+  else if (m === 'wave') { player.w = 20; player.h = 20; player.angle = 0; waveTrail = []; }
+  else if (m === 'ball') { player.w = 32; player.h = 32; player.angle = 0; }
+  else if (m === 'ufo') { player.w = 38; player.h = 24; player.angle = 0; }
+  else { player.w = TILE - 4; player.h = TILE - 4; player.angle = 0; }
+  player.y = cy - player.h / 2;
+  player.vy = 0;
+  jumpBuf = 0;
+  jumpDelay = 0;
+  orbBuf = 0;
+  banner = 100;
+  bannerText = { ship:'SUPER FURZ', wave:'WAVE', ball:'ADAMS KUGEL', ufo:'TEMU UFO', cube:'Temu Adam' }[m];
+  burst(player.x + player.w / 2, player.y + player.h / 2,
+        { ship:'#ff00cc', wave:'#ffe600', ball:'#00ff88', ufo:'#ff8800', cube:'#00e5ff' }[m], 24);
+  if (m === 'wave') startWaveVideo(); else stopWaveVideo();
+}
+
+function shipPhysics() {
+  jumpBuf = 0;
+  player.vy += holding ? -0.50 : 0.55;
+  player.vy = Math.max(-7.5, Math.min(7.5, player.vy));
+  player.y += player.vy;
+  if (player.y < 8) { player.y = 8; if (player.vy < 0) player.vy = 0; }
+  if (player.y + player.h > GROUND) { player.y = GROUND - player.h; if (player.vy > 0) player.vy = 0; }
+  player.onGround = false;
+  player.angle = Math.max(-0.5, Math.min(0.5, player.vy * 0.07));
+  particles.push({
+    x: player.x - 18, y: player.y + player.h / 2 + (Math.random() * 6 - 3),
+    vx: -speed * 0.5 - Math.random() * 2, vy: (Math.random() - 0.5) * 1.5,
+    life: 12, max: 12, color: holding ? '#ffb000' : '#ff5500', size: holding ? 4 : 3
+  });
+}
+
+// Wave: gedrückt = schräg hoch, losgelassen = schräg runter (konstante Geschwindigkeit)
+function wavePhysics() {
+  jumpBuf = 0;
+  player.vy = (holding ? -1 : 1) * speed * WAVE_SLOPE;
+  player.y += player.vy;
+  if (player.y < 8) player.y = 8;
+  if (player.y + player.h > GROUND) player.y = GROUND - player.h;
+  player.onGround = false;
+  const target = holding ? -Math.atan(WAVE_SLOPE) : Math.atan(WAVE_SLOPE);
+  player.angle += (target - player.angle) * 0.5;
+  // Spur
+  waveTrail.forEach(p => p.x -= speed);
+  waveTrail.push({ x: player.x + player.w / 2 - speed, y: player.y + player.h / 2 });
+  waveTrail = waveTrail.filter(p => p.x > -20);
+}
+
+// Ball: Klick am Boden / an der Decke dreht die Schwerkraft um
+function ballPhysics() {
+  if (jumpBuf > 0) {
+    jumpBuf--;
+    if (player.onGround) {
+      gravDir = -gravDir;
+      player.vy = gravDir * 3;
+      player.onGround = false;
+      jumpBuf = 0;
+      burst(player.x + player.w / 2, player.y + player.h / 2, '#00ff88', 8);
+    }
+  }
+  player.vy += 0.75 * gravDir;
+  player.vy = Math.max(-14, Math.min(14, player.vy));
+  player.y += player.vy;
+  player.onGround = false;
+  if (gravDir > 0 && player.y + player.h >= GROUND) {
+    player.y = GROUND - player.h; player.vy = 0; player.onGround = true;
+  }
+  if (gravDir < 0 && player.y <= 6) {
+    player.y = 6; player.vy = 0; player.onGround = true;
+  }
+  player.angle += gravDir * speed / (player.w / 2) * 0.5;
+}
+
+// UFO: jeder Tipp = kleiner Hüpfer, sonst sinkt es langsam
+function ufoPhysics() {
+  jumpBuf = 0;
+  if (ufoTap) {
+    player.vy = -8.4;
+    ufoTap = false;
+    burst(player.x + player.w / 2, player.y + player.h, '#ff8800', 5);
+  }
+  player.vy += 0.62;
+  if (player.vy > 9) player.vy = 9;
+  player.y += player.vy;
+  if (player.y < 8) { player.y = 8; if (player.vy < 0) player.vy = 0; }
+  if (player.y + player.h > GROUND) { player.y = GROUND - player.h; if (player.vy > 0) player.vy = 0; }
+  player.onGround = false;
+  player.angle = Math.max(-0.25, Math.min(0.25, player.vy * 0.03));
+}
+
+function spawnPattern() {
+  if (frame >= nextShip) {
+
+    // NEU: Reihenfolge nach jedem Durchlauf mischen
+    if (specialIdx > 0 && specialIdx % SPECIALS.length === 0) {
+      shuffleSpecials();
+    }
+
+    const m = SPECIALS[specialIdx % SPECIALS.length];
+    specialIdx++;
+
+    if (m === 'wave') spawnWave();
+    else if (m === 'ship') spawnShip();
+    else if (m === 'ball') spawnBall();
+    else spawnUfo();
+
+    return;
+  }
+
+  const avail = PATTERNS.map((p, i) => i)
+    .filter(i => PATTERNS[i].min <= frame && i !== lastPattern);
+
+  const idx = avail[Math.floor(Math.random() * avail.length)];
+  lastPattern = idx;
+
+  const width = PATTERNS[idx].f(W + 20);
+  const spacing = Math.max(260, 400 - Math.floor(frame / 300) * 12)
+    + Math.random() * 120;
+
+  spawnGap = width + spacing;
+  spawnDist = 0;
+}
+
+// ---------- Partikel ----------
+function burst(x, y, color, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = 2 + Math.random() * 6;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 2, life: 30 + Math.random() * 20, max: 50, color, size: 3 + Math.random() * 4 });
+  }
+}
+function updateParticles() {
+  particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.25; p.life--; });
+  particles = particles.filter(p => p.life > 0);
+}
+
+// ---------- Zeichnen ----------
+function currentPits() {
+  return obstacles.filter(o => o.type === 'pit').sort((a, b) => a.x - b.x);
+}
+
+function drawVideoBg() {
+  if (waveFade <= 0.01) return;
+  const vw = waveVideo.videoWidth, vh = waveVideo.videoHeight;
+  if (!vw || !vh || waveVideo.readyState < 2) return;
+  const sc = Math.max(W / vw, GROUND / vh);
+  const dw = vw * sc, dh = vh * sc;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, W, GROUND); ctx.clip();
+  ctx.globalAlpha = waveFade;
+  try { ctx.drawImage(waveVideo, (W - dw) / 2, (GROUND - dh) / 2, dw, dh); } catch (e) {}
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(0, 0, W, GROUND);
+  ctx.restore();
+}
+
+function drawBackground() {
+  const deco = THEMES[themeIdx % THEMES.length].deco;
+
+  // Leere unter dem Boden (Lücken)
+  ctx.fillStyle = '#04000c';
+  ctx.fillRect(0, 0, W, H);
+
+  // Himmel
+  const grad = ctx.createLinearGradient(0, 0, 0, GROUND);
+  grad.addColorStop(0, rgb(cur.skyTop));
+  grad.addColorStop(1, rgb(cur.skyBot));
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, GROUND);
+
+  // Disco: schwenkende Lichtkegel
+  if (deco === 'disco') {
+    ctx.save();
+    for (let i = 0; i < 7; i++) {
+      const bx = (i + 0.5) * W / 7;
+      const a = Math.sin(frame * 0.03 + i * 1.3) * 0.6;
+      const tx = bx + Math.tan(a) * GROUND;
+      ctx.fillStyle = rgb(i % 2 ? cur.accent : cur.spike, 0.12);
+      ctx.beginPath();
+      ctx.moveTo(bx - 4, 0); ctx.lineTo(bx + 4, 0);
+      ctx.lineTo(tx + 45, GROUND); ctx.lineTo(tx - 45, GROUND);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Mond / Sonne
+  ctx.save();
+  const sg = ctx.createRadialGradient(620, 80, 5, 620, 80, 70);
+  sg.addColorStop(0, rgb(cur.accent, 0.9));
+  sg.addColorStop(0.4, rgb(cur.accent, 0.35));
+  sg.addColorStop(1, rgb(cur.accent, 0));
+  ctx.fillStyle = sg;
+  ctx.fillRect(540, 0, 160, 170);
+  ctx.beginPath(); ctx.arc(620, 80, 28, 0, Math.PI * 2);
+  ctx.fillStyle = rgb(cur.accent, 0.85); ctx.fill();
+  ctx.restore();
+
+  // Sterne (im Gefrierfach: Schnee)
+  stars.forEach(s => {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, deco === 'snow' ? s.r + 0.8 : s.r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fill();
+  });
+
+  // Berge (weit weg)
+  if (deco !== 'disco') {
+    const mOff = (bgOffset * 0.12) % PERIOD;
+    ctx.fillStyle = rgb(cur.accent, (deco === 'mountains' || deco === 'snow') ? 0.22 : 0.12);
+    for (let rep = -1; rep <= 1; rep++) {
+      mountains.forEach(m => {
+        const x = m.x - mOff + rep * PERIOD;
+        if (x > W || x + m.w < 0) return;
+        ctx.beginPath();
+        ctx.moveTo(x, GROUND);
+        ctx.lineTo(x + m.w / 2, GROUND - m.h);
+        ctx.lineTo(x + m.w, GROUND);
+        ctx.closePath();
+        ctx.fill();
+      });
+    }
+  }
+
+  // Skyline (näher)
+  if (deco === 'city' || deco === 'disco') {
+    const bOff = (bgOffset * 0.3) % PERIOD;
+    for (let rep = -1; rep <= 1; rep++) {
+      buildings.forEach(b => {
+        const x = b.x - bOff + rep * PERIOD;
+        if (x > W || x + b.w < 0) return;
+        ctx.fillStyle = rgb(cur.skyTop, 0.9);
+        ctx.fillRect(x, GROUND - b.h, b.w, b.h);
+        ctx.strokeStyle = rgb(cur.accent, 0.3);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, GROUND - b.h + 0.5, b.w - 1, b.h - 1);
+        ctx.fillStyle = rgb(cur.accent, 0.35);
+        for (let wy = GROUND - b.h + 8; wy < GROUND - 8; wy += 14) {
+          for (let wx = x + 6; wx < x + b.w - 8; wx += 12) {
+            if (((wx * 7 + wy * 3 + b.win * 100) | 0) % 3 === 0) ctx.fillRect(wx, wy, 4, 5);
+          }
+        }
+      });
+    }
+  }
+
+  // Wave-Video über dem Himmel
+  drawVideoBg();
+
+  // Boden (mit Lücken)
+  const pits = currentPits();
+  const spans = [];
+  let sx = 0;
+  pits.forEach(p => {
+    if (p.x > sx) spans.push([sx, Math.min(p.x, W)]);
+    sx = Math.max(sx, p.x + p.w);
+  });
+  if (sx < W) spans.push([sx, W]);
+
+  const gGrad = ctx.createLinearGradient(0, GROUND, 0, H);
+  gGrad.addColorStop(0, rgb(cur.ground));
+  gGrad.addColorStop(1, rgb(cur.skyTop));
+  spans.forEach(([a, b]) => {
+    ctx.fillStyle = gGrad;
+    ctx.fillRect(a, GROUND, b - a, H - GROUND);
+  });
+
+  // Bodenlinie mit Glow
+  ctx.save();
+  ctx.shadowColor = rgb(cur.accent);
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = rgb(cur.accent);
+  ctx.lineWidth = 2.5;
+  spans.forEach(([a, b]) => {
+    ctx.beginPath(); ctx.moveTo(a, GROUND); ctx.lineTo(b, GROUND); ctx.stroke();
+  });
+  ctx.restore();
+
+  // Kacheln
+  const tileOff = (bgOffset * 1.5) % TILE;
+  ctx.strokeStyle = rgb(cur.accent, 0.2);
+  ctx.lineWidth = 1;
+  spans.forEach(([a, b]) => {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(a, GROUND, b - a, H - GROUND); ctx.clip();
+    for (let x = -tileOff; x < W; x += TILE) {
+      ctx.beginPath(); ctx.moveTo(x, GROUND); ctx.lineTo(x, H); ctx.stroke();
+    }
+    ctx.restore();
+  });
+
+  // Lücken-Kanten
+  ctx.save();
+  ctx.strokeStyle = rgb(cur.accent, 0.5);
+  ctx.lineWidth = 2;
+  pits.forEach(p => {
+    ctx.beginPath(); ctx.moveTo(p.x, GROUND); ctx.lineTo(p.x, H);
+    ctx.moveTo(p.x + p.w, GROUND); ctx.lineTo(p.x + p.w, H); ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function drawShip() {
+  const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(player.angle);
+  ctx.shadowColor = playerColor;
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = playerColor;
+  ctx.beginPath();
+  ctx.moveTo(22, 2); ctx.lineTo(8, -7); ctx.lineTo(-14, -7);
+  ctx.lineTo(-22, -15); ctx.lineTo(-22, 8); ctx.lineTo(8, 9);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  ctx.moveTo(-6, 3); ctx.lineTo(-18, 13); ctx.lineTo(-2, 13);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.beginPath();
+  ctx.arc(4, -7, 7, Math.PI, Math.PI * 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBall() {
+  const cx = player.x + player.w / 2, cy = player.y + player.h / 2, r = player.w / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(player.angle);
+  ctx.shadowColor = playerColor;
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = playerColor;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath(); ctx.arc(0, 0, r - 6, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-r + 3, 0); ctx.lineTo(r - 3, 0);
+  ctx.moveTo(0, -r + 3); ctx.lineTo(0, r - 3);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawUfo() {
+  const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(player.angle);
+  ctx.shadowColor = playerColor;
+  ctx.shadowBlur = 18;
+  // Kuppel
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.beginPath(); ctx.arc(0, -3, 11, Math.PI, Math.PI * 2); ctx.closePath(); ctx.fill();
+  // Teller
+  ctx.fillStyle = playerColor;
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 19, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Lichter
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.arc(i * 10, 3, 2, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawWave() {
+  // Spur
+  if (waveTrail.length > 1) {
+    ctx.save();
+    ctx.shadowColor = playerColor;
+    ctx.shadowBlur = 12;
+    ctx.strokeStyle = playerColor;
+    ctx.lineWidth = 6;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    waveTrail.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (state === 'dead') return;
+  // Pfeil
+  const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(player.angle);
+  ctx.shadowColor = playerColor;
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = playerColor;
+  ctx.beginPath();
+  ctx.moveTo(16, 0); ctx.lineTo(-12, -12); ctx.lineTo(-5, 0); ctx.lineTo(-12, 12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPortal(o) {
+  const col = { ship:[255,0,204], wave:[255,230,0], ball:[0,255,120], ufo:[255,140,0], cube:[0,229,255] }[o.mode];
+  ctx.save();
+  const g = ctx.createLinearGradient(o.x, 0, o.x + o.w, 0);
+  g.addColorStop(0, rgb(col, 0));
+  g.addColorStop(0.5, rgb(col, 0.55));
+  g.addColorStop(1, rgb(col, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(o.x, 0, o.w, GROUND);
+  ctx.shadowColor = rgb(col);
+  ctx.shadowBlur = 16;
+  ctx.strokeStyle = rgb(col);
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(o.x + o.w / 2, 0); ctx.lineTo(o.x + o.w / 2, GROUND); ctx.stroke();
+  ctx.lineWidth = 2;
+  for (let y = ((frame * 3) % 40) - 40; y < GROUND; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(o.x + 4, y + 14); ctx.lineTo(o.x + o.w / 2, y); ctx.lineTo(o.x + o.w - 4, y + 14);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawPillar(o) {
+  ctx.save();
+  ctx.shadowColor = rgb(cur.spike);
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = rgb(cur.block);
+  ctx.fillRect(o.x, o.y, o.w, o.h);
+  ctx.strokeStyle = rgb(cur.edge);
+  ctx.lineWidth = 2;
+  ctx.strokeRect(o.x + 1, o.y + 1, o.w - 2, o.h - 2);
+  ctx.fillStyle = rgb(cur.spike);
+  if (o.y > 0) ctx.fillRect(o.x, o.y, o.w, 4);              // Oberkante
+  if (o.y + o.h < GROUND - 1) ctx.fillRect(o.x, o.y + o.h - 4, o.w, 4); // Unterkante
+  ctx.restore();
+}
+
+// Schmale Säule des Wave-Gangs (ohne Seitenlinien, wirkt wie eine durchgehende Wand)
+function drawWcol(o) {
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = rgb(cur.block);
+  ctx.fillRect(o.x, o.y, o.w, o.h);
+  ctx.fillStyle = rgb(cur.spike);
+  if (o.top) ctx.fillRect(o.x, o.y + o.h - 4, o.w, 4);
+  else ctx.fillRect(o.x, o.y, o.w, 4);
+  ctx.restore();
+}
+
+function drawCeiling() {
+  ctx.save();
+  ctx.shadowColor = rgb(cur.accent);
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = rgb(cur.accent, 0.5);
+  ctx.fillRect(0, 0, W, 6);
+  ctx.strokeStyle = rgb(cur.accent);
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, 6); ctx.lineTo(W, 6); ctx.stroke();
+  ctx.restore();
+}
+
+function drawPlayer() {
+  if (mode === 'wave') { drawWave(); return; }
+  if (state === 'dead') return;
+  if (mode === 'ship') { drawShip(); return; }
+  if (mode === 'ball') { drawBall(); return; }
+  if (mode === 'ufo') { drawUfo(); return; }
+  ctx.save();
+  const cx = player.x + player.w / 2;
+  const cy = player.y + player.h / 2;
+  ctx.translate(cx, cy);
+  ctx.rotate(player.angle);
+  ctx.shadowColor = playerColor;
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = playerColor;
+  ctx.fillRect(-player.w/2, -player.h/2, player.w, player.h);
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.fillRect(-player.w/2 + 5, -player.h/2 + 5, player.w - 10, player.h - 10);
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-player.w/2 + 4, 0); ctx.lineTo(player.w/2 - 4, 0);
+  ctx.moveTo(0, -player.h/2 + 4); ctx.lineTo(0, player.h/2 - 4);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawObstacles() {
+  obstacles.forEach(obs => {
+    if (obs.type === 'pit') return;
+    if (obs.x > W + 60) return;
+    if (obs.type === 'portal') { drawPortal(obs); return; }
+    if (obs.type === 'pillar') { drawPillar(obs); return; }
+    if (obs.type === 'wcol') { drawWcol(obs); return; }
+    ctx.save();
+    if (obs.type === 'spike' || obs.type === 'cspike') {
+      ctx.shadowColor = rgb(cur.spike);
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = rgb(cur.spike);
+      ctx.beginPath();
+      if (obs.type === 'spike') {
+        ctx.moveTo(obs.x, obs.y + obs.h);
+        ctx.lineTo(obs.x + obs.w / 2, obs.y);
+        ctx.lineTo(obs.x + obs.w, obs.y + obs.h);
+      } else {
+        ctx.moveTo(obs.x, obs.y);
+        ctx.lineTo(obs.x + obs.w / 2, obs.y + obs.h);
+        ctx.lineTo(obs.x + obs.w, obs.y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    } else if (obs.type === 'saw') {
+      const cx = obs.x + obs.r, cy = obs.y + obs.r;
+      ctx.translate(cx, cy);
+      ctx.rotate(frame * 0.25);
+      ctx.shadowColor = rgb(cur.spike);
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = '#d8d8e8';
+      ctx.beginPath();
+      const teeth = 10;
+      for (let i = 0; i < teeth * 2; i++) {
+        const a = (i / (teeth * 2)) * Math.PI * 2;
+        const r = i % 2 === 0 ? obs.r : obs.r * 0.68;
+        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = rgb(cur.spike);
+      ctx.beginPath(); ctx.arc(0, 0, obs.r * 0.3, 0, Math.PI * 2); ctx.fill();
+    } else if (obs.type === 'orb') {
+      const cx = obs.x + obs.w / 2, cy = obs.y + obs.h / 2;
+      const pulse = 1 + Math.sin(frame * 0.2) * 0.12;
+      ctx.shadowColor = '#ffe600';
+      ctx.shadowBlur = 20;
+      ctx.globalAlpha = obs.used ? 0.35 : 1;
+      ctx.strokeStyle = '#ffe600';
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(cx, cy, 15 * pulse, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,230,0,0.45)';
+      ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+    } else if (obs.type === 'pad') {
+      ctx.shadowColor = '#ffe600';
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = '#ffe600';
+      ctx.beginPath();
+      ctx.moveTo(obs.x, GROUND);
+      ctx.lineTo(obs.x + 6, GROUND - 10);
+      ctx.lineTo(obs.x + obs.w - 6, GROUND - 10);
+      ctx.lineTo(obs.x + obs.w, GROUND);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(obs.x + 12, GROUND - 3); ctx.lineTo(obs.x + 20, GROUND - 8); ctx.lineTo(obs.x + 28, GROUND - 3);
+      ctx.stroke();
+    } else {
+      // block / platform
+      ctx.shadowColor = rgb(cur.edge);
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = rgb(cur.block);
+      ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+      ctx.strokeStyle = rgb(cur.edge);
+      ctx.lineWidth = 2;
+      ctx.strokeRect(obs.x + 1, obs.y + 1, obs.w - 2, obs.h - 2);
+      ctx.strokeStyle = rgb(cur.edge, 0.3);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (obs.type === 'platform') {
+        for (let x = obs.x + TILE; x < obs.x + obs.w; x += TILE) { ctx.moveTo(x, obs.y); ctx.lineTo(x, obs.y + obs.h); }
+      } else {
+        const mid = obs.w / 2;
+        ctx.moveTo(obs.x + mid, obs.y); ctx.lineTo(obs.x + mid, obs.y + obs.h);
+        for (let y = obs.y + TILE; y < obs.y + obs.h; y += TILE) { ctx.moveTo(obs.x, y); ctx.lineTo(obs.x + obs.w, y); }
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  });
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = Math.max(0, p.life / p.max);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = 'bold 20px Arial Black';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Score: ${score}`, 12, 28);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = rgb(cur.accent);
+  ctx.font = 'bold 14px Arial Black';
+  ctx.fillText(`ZONE ${(themeIdx % THEMES.length) + 1}: ${THEMES[themeIdx % THEMES.length].name}`, W - 12, 24);
+  ctx.textAlign = 'left';
+  if (banner > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, banner / 30);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 34px Arial Black';
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = rgb(cur.accent);
+    ctx.shadowBlur = 20;
+    ctx.fillText(bannerText, W / 2, 80);
+    ctx.restore();
+  }
+}
+
+function drawDeathScreen() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#ff3366';
+  ctx.font = 'bold 48px Arial Black';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = '#ff3366';
+  ctx.shadowBlur = 25;
+  ctx.fillText('ADAM DIED', W / 2, H / 2 - 20);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px Arial Black';
+  ctx.shadowBlur = 10;
+  ctx.fillText(`Score: ${score}`, W / 2, H / 2 + 25);
+  ctx.restore();
+}
+
+// ---------- Logik ----------
+function aabb(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x &&
+         a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function hazardBox(obs) {
+  if (obs.type === 'spike') return { x: obs.x + 8, y: obs.y + 10, w: obs.w - 16, h: obs.h - 10 };
+  if (obs.type === 'cspike') return { x: obs.x + 8, y: obs.y, w: obs.w - 16, h: obs.h - 10 };
+  if (obs.type === 'saw') { const m = obs.r * 0.3; return { x: obs.x + m, y: obs.y + m, w: obs.w - 2*m, h: obs.h - 2*m }; }
+  return obs;
+}
+function die() {
+  state = 'dead';
+  stopShipSound();
+  stopWaveVideo();
+  playDeathSound();
+  burst(player.x + player.w / 2, player.y + player.h / 2, playerColor, 36);
+  msgEl.textContent = 'Furze zum Neustart';
+}
+
+
+function update() {
+  updateTheme();
+  updateParticles();
+  waveFade = Math.max(0, Math.min(1, waveFade + ((mode === 'wave' && state === 'playing') ? 0.06 : -0.06)));
+  if (banner > 0) banner--;
+  if (state !== 'playing') return;
+
+  frame++;
+  score = Math.floor(frame / 6);
+  scoreEl.textContent = score;
+  if (orbBuf > 0) orbBuf--;
+
+  timeScale += ((mode === 'wave' ? WAVE_TIME : 1) - timeScale) * 0.08;
+  if (mode === 'ship') {
+    speed = SPEED_INIT;
+} else {
+    speed = (SPEED_INIT + Math.floor(frame / 400) * 0.5) * timeScale;
+}
+  const newTheme = Math.floor(frame / ZONE_LENGTH);
+  if (newTheme !== themeIdx) {
+    themeIdx = newTheme;
+    banner = 100;
+    bannerText = THEMES[themeIdx % THEMES.length].name;
+  }
+  if (frame % 500 === 0) {
+    colorIdx = (colorIdx + 1) % PLAYER_COLORS.length;
+    playerColor = PLAYER_COLORS[colorIdx];
+  }
+
+  bgOffset += speed;
+  const snow = THEMES[themeIdx % THEMES.length].deco === 'snow';
+  stars.forEach(s => {
+    s.x -= s.speed * (speed / SPEED_INIT);
+    if (snow) s.y += 0.7 * (speed / SPEED_INIT);
+    if (s.x < 0 || s.y > GROUND) { s.x = W; s.y = snow ? Math.random() * 40 : Math.random() * (GROUND - 60); }
+  });
+
+  // Hindernisse bewegen & erzeugen
+  obstacles.forEach(obs => {
+    obs.x -= speed;
+    if (obs.amp) obs.y = obs.by + Math.sin(frame * 0.07 + obs.ph) * obs.amp;
+  });
+  obstacles = obstacles.filter(obs => obs.x + obs.w > -10);
+  spawnDist += speed;
+  if (spawnDist >= spawnGap) spawnPattern();
+
+  if (mode === 'ship') { shipPhysics(); }
+  else if (mode === 'wave') { wavePhysics(); }
+  else if (mode === 'ball') { ballPhysics(); }
+  else if (mode === 'ufo') { ufoPhysics(); }
+  else {
+  // Verzögerter Sprung: nach JUMP_DELAY Frames abheben (sonst kurz puffern)
+  if (jumpDelay > 0) {
+    jumpDelay--;
+    if (jumpDelay === 0) {
+      if (player.onGround) { player.vy = JUMP; player.onGround = false; jumpBuf = 0; }
+      else jumpBuf = 8;
+    }
+  }
+  // Gepufferter Sprung
+  if (jumpBuf > 0) {
+    jumpBuf--;
+    if (player.onGround) { player.vy = JUMP; player.onGround = false; jumpBuf = 0; }
+  }
+
+  // Physik
+  const prevBottom = player.y + player.h;
+  player.vy += GRAVITY;
+  player.y += player.vy;
+  player.onGround = false;
+  const bottom = player.y + player.h;
+
+  // Landung auf Boden (nicht über Lücke)
+  const cx = player.x + player.w / 2;
+  const overPit = obstacles.some(o => o.type === 'pit' && cx > o.x && cx < o.x + o.w);
+  if (!overPit && player.vy >= 0 && bottom >= GROUND && prevBottom <= GROUND + 10) {
+    player.y = GROUND - player.h;
+    player.vy = 0;
+    player.onGround = true;
+  }
+
+  // Landung auf Blöcken / Plattformen
+  for (const s of obstacles) {
+    if (!s.solid) continue;
+    const overlapX = player.x + 3 < s.x + s.w && player.x + player.w - 3 > s.x;
+    if (overlapX && player.vy >= 0 && prevBottom <= s.y + 4 && player.y + player.h >= s.y) {
+      player.y = s.y - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+  }
+
+  if (player.onGround) {
+    player.angle = Math.round(player.angle / (Math.PI / 2)) * (Math.PI / 2);
+  } else {
+    player.angle += 0.1;
+  }
+  } // Ende Würfel-Physik
+
+  // Trail
+  if (frame % 2 === 0 && mode === 'cube') {
+    particles.push({ x: player.x, y: player.y + player.h - 6 + Math.random() * 6, vx: -speed * 0.4, vy: 0, life: 14, max: 14, color: playerColor, size: 3 });
+  }
+  if (frame % 2 === 0 && mode === 'ufo') {
+    particles.push({ x: player.x + 4, y: player.y + player.h, vx: -speed * 0.3, vy: 1, life: 12, max: 12, color: '#ff8800', size: 3 });
+  }
+  if (frame % 2 === 0 && mode === 'ball') {
+    particles.push({ x: player.x, y: player.y + player.h / 2, vx: -speed * 0.4, vy: 0, life: 12, max: 12, color: '#00ff88', size: 3 });
+  }
+
+  // Tod durch Absturz
+  if (player.y > H + 20) { die(); return; }
+
+  // Kollisionen
+  const pHit = { x: player.x + 3, y: player.y + 3, w: player.w - 6, h: player.h - 6 };
+  for (const obs of obstacles) {
+    if (obs.type === 'pit') continue;
+    if (obs.type === 'portal') {
+      if (!obs.used && obs.x + obs.w / 2 <= player.x + player.w / 2) {
+        obs.used = true;
+        setMode(obs.mode);
+        return;
+      }
+      continue;
+    }
+    if (obs.type === 'pad') {
+      if (mode === 'cube' && !obs.used && player.vy >= 0 && aabb(pHit, obs)) {
+        obs.used = true;
+        player.vy = PAD_JUMP;
+        player.onGround = false;
+        burst(obs.x + obs.w / 2, GROUND - 10, '#ffe600', 10);
+      }
+      continue;
+    }
+    if (obs.type === 'orb') {
+      if (mode === 'cube' && !obs.used && orbBuf > 0 && aabb(pHit, obs)) {
+        obs.used = true;
+        player.vy = JUMP;
+        player.onGround = false;
+        orbBuf = 0; jumpBuf = 0; jumpDelay = 0;
+        burst(obs.x + obs.w / 2, obs.y + obs.h / 2, '#ffe600', 12);
+      }
+      continue;
+    }
+    if (aabb(pHit, hazardBox(obs))) { die(); return; }
+  }
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  drawBackground();
+  drawObstacles();
+  if (mode !== 'cube') drawCeiling();
+  drawParticles();
+  drawPlayer();
+  drawHUD();
+  if (state === 'dead') drawDeathScreen();
+}
+
+function loop() {
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
