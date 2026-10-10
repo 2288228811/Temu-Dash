@@ -74,7 +74,7 @@ function stopShipSound() {
 // ---------- Wave-Video (Hintergrund im Wave-Modus) ----------
 const VIDEO_SOUND = true;    // true = Ton des Videos während Wave an
 const WAVE_SLOPE = 0.85;     // Steigung der Wave (1 = 45°)
-const WAVE_TIME = 0.4;       // Zeitlupe in der Wave (1 = normal, kleiner = langsamer)
+const WAVE_TIME = 0.5;       // Zeitlupe in der Wave (1 = normal, kleiner = langsamer)
 let timeScale = 1;
 const waveVideo = document.createElement('video');
 waveVideo.src = 'Video1.mp4';
@@ -125,7 +125,7 @@ let holding = false;      // Taste/Finger gedrückt (für Flugzeug / Wave)
 let mode = 'cube';        // 'cube', 'ship', 'wave', 'ball' oder 'ufo'
 let nextShip = 350;       // ab diesem Frame kommt der nächste Spezial-Abschnitt
 let specialIdx = 0;       // welcher Spezial-Abschnitt als Nächstes kommt
-let SPECIALS = ['wave', 'ship', 'ball', 'ufo'];
+const SPECIALS = ['ship', 'wave', 'ball', 'ufo'];
 
 function shuffleSpecials() {
     for (let i = SPECIALS.length - 1; i > 0; i--) {
@@ -508,10 +508,7 @@ function ufoPhysics() {
 function spawnPattern() {
   if (frame >= nextShip) {
 
-    // NEU: Reihenfolge nach jedem Durchlauf mischen
-    if (specialIdx > 0 && specialIdx % SPECIALS.length === 0) {
-      shuffleSpecials();
-    }
+   
 
     const m = SPECIALS[specialIdx % SPECIALS.length];
     specialIdx++;
