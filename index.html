@@ -6,6 +6,7 @@
 <title>Geometry Dash</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     background: #1a0533;
     display: flex; flex-direction: column;
@@ -19,7 +20,22 @@
     margin-bottom: 8px;
     text-shadow: 0 0 10px #f0c;
     letter-spacing: 2px;
+    display: flex; align-items: center; gap: 14px;
   }
+  #pauseBtn {
+    font-family: inherit;
+    font-size: 14px;
+    color: #fff;
+    background: rgba(255,0,204,0.25);
+    border: 2px solid #f0c;
+    border-radius: 6px;
+    padding: 4px 12px;
+    cursor: pointer;
+    box-shadow: 0 0 10px #f0c;
+    letter-spacing: 1px;
+  }
+  #pauseBtn:hover { background: rgba(255,0,204,0.5); }
+  #wrap { position: relative; display: inline-block; max-width: 100%; }
   canvas {
     border: 3px solid #f0c;
     box-shadow: 0 0 30px #f0c, 0 0 60px #80f;
@@ -27,6 +43,30 @@
     display: block;
     max-width: 100%;
   }
+  #pausePanel {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 12px;
+    background: rgba(10,0,25,0.78);
+    color: #fff;
+    border-radius: 4px;
+    text-shadow: 0 0 8px #0ff;
+  }
+  #pausePanel h2 { font-size: 30px; letter-spacing: 4px; text-shadow: 0 0 16px #f0c; }
+  .row { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+  .row label { width: 90px; text-align: right; }
+  .row input[type=range] { width: 200px; accent-color: #f0c; }
+  .row .val { width: 50px; text-align: left; color: #0ff; }
+  .btns { display: flex; gap: 10px; margin-top: 4px; }
+  .btns button {
+    font-family: inherit; font-size: 14px; color: #fff;
+    background: rgba(0,229,255,0.2);
+    border: 2px solid #0ff; border-radius: 6px;
+    padding: 6px 14px; cursor: pointer;
+    box-shadow: 0 0 10px #0ff;
+  }
+  .btns button:hover { background: rgba(0,229,255,0.45); }
   #msg {
     color: #fff;
     font-size: 18px;
@@ -38,8 +78,27 @@
 </style>
 </head>
 <body>
-<div id="ui">TEMU DASH &nbsp;|&nbsp; <span id="score">0</span></div>
+<div id="ui">TEMU DASH &nbsp;|&nbsp; <span id="score">0</span> <button id="pauseBtn" type="button">⏸ Pause</button></div>
+<div id="wrap">
 <canvas id="c" width="800" height="300"></canvas>
+<div id="pausePanel" hidden>
+  <h2>PAUSE</h2>
+  <div class="row">
+    <label for="speedSlider">Speed</label>
+    <input type="range" id="speedSlider" min="0.5" max="2" step="0.05" value="1">
+    <span class="val" id="speedVal">1.00x</span>
+  </div>
+  <div class="row">
+    <label for="gravSlider">Gravity</label>
+    <input type="range" id="gravSlider" min="0.3" max="1.7" step="0.05" value="1">
+    <span class="val" id="gravVal">1.00x</span>
+  </div>
+  <div class="btns">
+    <button id="resumeBtn" type="button">▶ Weiter</button>
+    <button id="resetSetBtn" type="button">Zurücksetzen</button>
+  </div>
+</div>
+</div>
 <div id="msg">Tippe / Leertaste zum Starten</div>
 
 <script>
@@ -112,6 +171,9 @@ const ZONE_LENGTH = 1500; // Frames pro Zone
 const JUMP_DELAY = 1;     // Verzögerung beim Sprung in Frames (60 Frames = 1 Sekunde), 0 = aus
 
 let state = 'idle'; // idle, playing, dead
+let paused = false;       // Pause an/aus
+let speedMul = 1;         // Speed-Faktor (Pause-Menü)
+let gravMul = 1;          // Gravity-Faktor (Pause-Menü)
 let score = 0;
 let speed = SPEED_INIT;
 let frame = 0;
@@ -126,6 +188,9 @@ let mode = 'cube';        // 'cube', 'ship', 'wave', 'ball' oder 'ufo'
 let nextShip = 350;       // ab diesem Frame kommt der nächste Spezial-Abschnitt
 let specialIdx = 0;       // welcher Spezial-Abschnitt als Nächstes kommt
 const SPECIALS = ['ship', 'wave', 'ball', 'ufo'];
+let checkpoints = [];     // erreichte, noch unbenutzte Checkpoints (Snapshots)
+let nextCheckpoint = 600; // ab diesem Frame wird der nächste Checkpoint platziert
+let cpId = 0;
 
 function shuffleSpecials() {
     for (let i = SPECIALS.length - 1; i > 0; i--) {
@@ -189,10 +254,52 @@ const PLAYER_COLORS = ['#00f5ff','#ff00cc','#ffe600','#00ff88'];
 let colorIdx = 0;
 let playerColor = PLAYER_COLORS[colorIdx];
 
+// ---------- Pause-Menü ----------
+const pauseBtn = document.getElementById('pauseBtn');
+const pausePanel = document.getElementById('pausePanel');
+const speedSlider = document.getElementById('speedSlider');
+const gravSlider = document.getElementById('gravSlider');
+const speedVal = document.getElementById('speedVal');
+const gravVal = document.getElementById('gravVal');
+let musicWasOn = false, shipWasOn = false, waveWasOn = false;
+
+function setPaused(p) {
+  if (p === paused) return;
+  paused = p;
+  holding = false;
+  pausePanel.hidden = !p;
+  pauseBtn.textContent = p ? '▶ Weiter' : '⏸ Pause';
+  if (p) {
+    musicWasOn = !bgMusic.paused;   bgMusic.pause();
+    shipWasOn = !shipSound.paused;  shipSound.pause();
+    waveWasOn = !waveVideo.paused;  waveVideo.pause();
+  } else {
+    if (musicWasOn) bgMusic.play().catch(() => {});
+    if (shipWasOn) shipSound.play().catch(() => {});
+    if (waveWasOn) waveVideo.play().catch(() => {});
+  }
+  pauseBtn.blur();
+}
+function syncSliders() {
+  speedVal.textContent = speedMul.toFixed(2) + 'x';
+  gravVal.textContent = gravMul.toFixed(2) + 'x';
+}
+speedSlider.addEventListener('input', () => { speedMul = parseFloat(speedSlider.value); syncSliders(); });
+gravSlider.addEventListener('input', () => { gravMul = parseFloat(gravSlider.value); syncSliders(); });
+document.getElementById('resumeBtn').addEventListener('click', () => setPaused(false));
+document.getElementById('resetSetBtn').addEventListener('click', () => {
+  speedMul = 1; gravMul = 1;
+  speedSlider.value = 1; gravSlider.value = 1;
+  syncSliders();
+});
+pauseBtn.addEventListener('click', () => setPaused(!paused));
+syncSliders();
+
 // ---------- Input ----------
 function jump() {
+  if (paused) return;
   if (state === 'idle') { startGame(); return; }
-  if (state === 'dead') { resetGame(); return; }
+  if (state === 'dead') { respawn(); return; }
   if (mode === 'ship' || mode === 'wave') return;
   if (mode === 'ball') { jumpBuf = 9; return; }
   if (mode === 'ufo') { ufoTap = true; return; }
@@ -221,6 +328,10 @@ function resetGame() {
   gravDir = 1;
   mode = 'cube';
   specialIdx = 0;
+  checkpoints = [];
+  nextCheckpoint = 600;
+  cpId = 0;
+  lastPattern = -1;
   stopWaveVideo();
   waveFade = 0;
   waveTrail = [];
@@ -240,7 +351,50 @@ function resetGame() {
   msgEl.textContent = '';
 }
 
+// ---------- Checkpoints (jeder darf nur einmal benutzt werden) ----------
+function saveCheckpoint(cp) {
+  checkpoints.push({
+    id: cp.id,
+    frame, score, themeIdx, specialIdx, nextShip, nextCheckpoint,
+    lastPattern, spawnDist, spawnGap, bgOffset, colorIdx,
+    obstacles: JSON.parse(JSON.stringify(obstacles))
+  });
+}
+
+// Nach dem Tod: letzten unbenutzten Checkpoint nehmen (wird dabei verbraucht),
+// gibt es keinen mehr, startet das Spiel von vorn.
+function respawn() {
+  const s = checkpoints.pop();
+  if (!s) { resetGame(); return; }
+  state = 'playing';
+  frame = s.frame; score = s.score; themeIdx = s.themeIdx;
+  specialIdx = s.specialIdx; nextShip = s.nextShip; nextCheckpoint = s.nextCheckpoint;
+  lastPattern = s.lastPattern; spawnDist = s.spawnDist; spawnGap = s.spawnGap;
+  bgOffset = s.bgOffset; colorIdx = s.colorIdx; playerColor = PLAYER_COLORS[colorIdx];
+  obstacles = s.obstacles;
+  obstacles.forEach(o => { if (o.type === 'checkpoint' && o.id === s.id) o.used = true; });
+  particles = [];
+  jumpBuf = 0; jumpDelay = 0; orbBuf = 0; ufoTap = false; gravDir = 1;
+  mode = 'cube';
+  player.w = TILE - 4; player.h = TILE - 4;
+  player.y = GROUND - player.h; player.vy = 0; player.onGround = true; player.angle = 0;
+  stopWaveVideo(); stopShipSound();
+  waveFade = 0; waveTrail = []; timeScale = 1;
+  speed = SPEED_INIT + Math.floor(frame / 400) * 0.5;
+  snapTheme();
+  scoreEl.textContent = score;
+  msgEl.textContent = '';
+  banner = 70; bannerText = 'CHECKPOINT';
+  burst(player.x + player.w / 2, player.y + player.h / 2, '#00ff88', 20);
+}
+
 document.addEventListener('keydown', e => {
+  if (e.code === 'KeyP' || e.code === 'Escape') {
+    e.preventDefault();
+    setPaused(!paused);
+    return;
+  }
+  if (paused) return; // im Pause-Menü Tasten (z. B. Slider) normal benutzen
   if (e.code === 'Space' || e.code === 'ArrowUp') {
     e.preventDefault();
     holding = true;
@@ -252,9 +406,15 @@ document.addEventListener('keydown', e => {
 document.addEventListener('keyup', e => {
   if (e.code === 'Space' || e.code === 'ArrowUp') holding = false;
 });
-canvas.addEventListener('mousedown', () => { holding = true; jump(); });
+canvas.addEventListener('mousedown', () => { if (paused) return; holding = true; jump(); });
 document.addEventListener('mouseup', () => { holding = false; });
-document.body.addEventListener('touchstart', e => { e.preventDefault(); holding = true; jump(); }, {passive: false});
+document.body.addEventListener('touchstart', e => {
+  // Pause-Button und Menü müssen normal antippbar bleiben
+  if (e.target.closest('#pauseBtn, #pausePanel')) return;
+  e.preventDefault();
+  if (paused) return;
+  holding = true; jump();
+}, {passive: false});
 document.addEventListener('touchend', () => { holding = false; });
 document.addEventListener('touchcancel', () => { holding = false; });
 
@@ -326,7 +486,7 @@ function spawnShip() {
   const startX = portalIn('ship');
   let x = startX + 330;
   let center = 120 + Math.random() * 60;
-  const n = 27 + Math.floor(Math.random() * 4);
+  const n = 19 + Math.floor(Math.random() * 4);
   for (let i = 0; i < n; i++) {
     if (Math.random() < 0.25) {
       // Block mitten im Gang: drüber oder drunter fliegen
@@ -433,7 +593,7 @@ function setMode(m) {
 
 function shipPhysics() {
   jumpBuf = 0;
-  player.vy += holding ? -0.50 : 0.55;
+  player.vy += (holding ? -0.50 : 0.55) * gravMul;
   player.vy = Math.max(-7.5, Math.min(7.5, player.vy));
   player.y += player.vy;
   if (player.y < 8) { player.y = 8; if (player.vy < 0) player.vy = 0; }
@@ -475,7 +635,7 @@ function ballPhysics() {
       burst(player.x + player.w / 2, player.y + player.h / 2, '#00ff88', 8);
     }
   }
-  player.vy += 0.75 * gravDir;
+  player.vy += 0.75 * gravMul * gravDir;
   player.vy = Math.max(-14, Math.min(14, player.vy));
   player.y += player.vy;
   player.onGround = false;
@@ -496,7 +656,7 @@ function ufoPhysics() {
     ufoTap = false;
     burst(player.x + player.w / 2, player.y + player.h, '#ff8800', 5);
   }
-  player.vy += 0.62;
+  player.vy += 0.62 * gravMul;
   if (player.vy > 9) player.vy = 9;
   player.y += player.vy;
   if (player.y < 8) { player.y = 8; if (player.vy < 0) player.vy = 0; }
@@ -528,8 +688,16 @@ function spawnPattern() {
   lastPattern = idx;
 
   const width = PATTERNS[idx].f(W + 20);
-  const spacing = Math.max(260, 400 - Math.floor(frame / 300) * 12)
+  let spacing = Math.max(260, 400 - Math.floor(frame / 300) * 12)
     + Math.random() * 120;
+
+  // Checkpoint: mitten in einer extra langen Lücke, damit der Respawn sicher ist
+  if (frame >= nextCheckpoint) {
+    spacing += 260;
+    obstacles.push({ type:'checkpoint', id: ++cpId, x: W + 20 + width + spacing / 2 - 15,
+                     y:0, w:30, h:GROUND, hit:false, used:false });
+    nextCheckpoint = frame + 1100 + Math.random() * 400;
+  }
 
   spawnGap = width + spacing;
   spawnDist = 0;
@@ -877,6 +1045,34 @@ function drawCeiling() {
   ctx.restore();
 }
 
+function drawCheckpoint(o) {
+  const col = o.used ? [120,120,140] : o.hit ? [0,255,120] : [255,255,255];
+  const cx = o.x + o.w / 2;
+  ctx.save();
+  ctx.globalAlpha = o.used ? 0.35 : 1;
+  // Lichtsäule
+  const g = ctx.createLinearGradient(o.x, 0, o.x + o.w, 0);
+  g.addColorStop(0, rgb(col, 0));
+  g.addColorStop(0.5, rgb(col, 0.16));
+  g.addColorStop(1, rgb(col, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(o.x, 0, o.w, GROUND);
+  ctx.shadowColor = rgb(col);
+  ctx.shadowBlur = o.used ? 0 : 14;
+  ctx.strokeStyle = rgb(col);
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(cx, GROUND); ctx.lineTo(cx, GROUND - 120); ctx.stroke();
+  // Fahne
+  const w = Math.sin(frame * 0.2) * 4;
+  ctx.fillStyle = rgb(col, 0.9);
+  ctx.beginPath();
+  ctx.moveTo(cx, GROUND - 120); ctx.lineTo(cx + 34, GROUND - 108 + w); ctx.lineTo(cx, GROUND - 94);
+  ctx.closePath(); ctx.fill();
+  // Bodenring
+  ctx.beginPath(); ctx.ellipse(cx, GROUND, 20, 5, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+
 function drawPlayer() {
   if (mode === 'wave') { drawWave(); return; }
   if (state === 'dead') return;
@@ -910,6 +1106,7 @@ function drawObstacles() {
     if (obs.type === 'portal') { drawPortal(obs); return; }
     if (obs.type === 'pillar') { drawPillar(obs); return; }
     if (obs.type === 'wcol') { drawWcol(obs); return; }
+    if (obs.type === 'checkpoint') { drawCheckpoint(obs); return; }
     ctx.save();
     if (obs.type === 'spike' || obs.type === 'cspike') {
       ctx.shadowColor = rgb(cur.spike);
@@ -1014,6 +1211,9 @@ function drawHUD() {
   ctx.font = 'bold 20px Arial Black';
   ctx.textAlign = 'left';
   ctx.fillText(`Score: ${score}`, 12, 28);
+  ctx.font = 'bold 14px Arial Black';
+  ctx.fillStyle = checkpoints.length ? '#00ff88' : 'rgba(255,255,255,0.4)';
+  ctx.fillText(`Checkpoints: ${checkpoints.length}`, 12, 48);
   ctx.textAlign = 'right';
   ctx.fillStyle = rgb(cur.accent);
   ctx.font = 'bold 14px Arial Black';
@@ -1046,6 +1246,10 @@ function drawDeathScreen() {
   ctx.font = 'bold 22px Arial Black';
   ctx.shadowBlur = 10;
   ctx.fillText(`Score: ${score}`, W / 2, H / 2 + 25);
+  ctx.font = 'bold 16px Arial Black';
+  ctx.fillStyle = checkpoints.length ? '#00ff88' : '#ffb0c0';
+  ctx.fillText(checkpoints.length ? `Weiter ab Checkpoint (noch ${checkpoints.length})`
+                                  : 'Kein Checkpoint mehr: Neustart', W / 2, H / 2 + 55);
   ctx.restore();
 }
 
@@ -1067,11 +1271,12 @@ function die() {
   stopWaveVideo();
   playDeathSound();
   burst(player.x + player.w / 2, player.y + player.h / 2, playerColor, 36);
-  msgEl.textContent = 'Furze zum Neustart';
+  msgEl.textContent = checkpoints.length ? 'Furze: weiter ab Checkpoint' : 'Furze zum Neustart';
 }
 
 
 function update() {
+  if (paused) return; // Pause: alles einfrieren
   updateTheme();
   updateParticles();
   waveFade = Math.max(0, Math.min(1, waveFade + ((mode === 'wave' && state === 'playing') ? 0.06 : -0.06)));
@@ -1085,10 +1290,10 @@ function update() {
 
   timeScale += ((mode === 'wave' ? WAVE_TIME : 1) - timeScale) * 0.08;
   if (mode === 'ship') {
-    speed = SPEED_INIT;
-} else {
-    speed = (SPEED_INIT + Math.floor(frame / 400) * 0.5) * timeScale;
-}
+    speed = SPEED_INIT * speedMul;
+  } else {
+    speed = (SPEED_INIT + Math.floor(frame / 400) * 0.5) * timeScale * speedMul;
+  }
   const newTheme = Math.floor(frame / ZONE_LENGTH);
   if (newTheme !== themeIdx) {
     themeIdx = newTheme;
@@ -1138,7 +1343,7 @@ function update() {
 
   // Physik
   const prevBottom = player.y + player.h;
-  player.vy += GRAVITY;
+  player.vy += GRAVITY * gravMul;
   player.y += player.vy;
   player.onGround = false;
   const bottom = player.y + player.h;
@@ -1193,6 +1398,17 @@ function update() {
         obs.used = true;
         setMode(obs.mode);
         return;
+      }
+      continue;
+    }
+    if (obs.type === 'checkpoint') {
+      if (!obs.hit && obs.x + obs.w / 2 <= player.x + player.w / 2) {
+        obs.hit = true;
+        if (mode === 'cube') {
+          saveCheckpoint(obs);
+          banner = 80; bannerText = 'CHECKPOINT';
+          burst(obs.x + obs.w / 2, GROUND - 20, '#00ff88', 18);
+        }
       }
       continue;
     }
