@@ -110,8 +110,22 @@ const msgEl = document.getElementById('msg');
 const bgMusic = new Audio('Sound5.mp3');
 bgMusic.loop = true;
 
-function startBgMusic() { bgMusic.play().catch(() => {}); }
-function pauseBgMusic() { bgMusic.pause(); }
+let musicWanted = false;   // soll die Musik gerade laufen?
+bgMusic.preload = 'auto';
+bgMusic.addEventListener('error', () => {
+  msgEl.textContent = 'Sound5.mp3 nicht gefunden (Dateiname/Ordner prüfen)';
+});
+function startBgMusic(restart = false) {
+  musicWanted = true;
+  if (restart) { try { bgMusic.currentTime = 0; } catch (e) {} }
+  bgMusic.play().catch(() => {});
+}
+function pauseBgMusic() { musicWanted = false; bgMusic.pause(); }
+// Falls der Browser das Abspielen anfangs blockt: bei jeder Eingabe erneut versuchen
+['keydown', 'mousedown', 'touchend', 'click'].forEach(ev =>
+  document.addEventListener(ev, () => {
+    if (musicWanted && !paused && bgMusic.paused) bgMusic.play().catch(() => {});
+  }));
 const DEATH_SOUNDS = ['Sound1.mp3', 'Sound2.mp3', 'Sound3.mp3'].map(f => new Audio(f));
 const shipSound = new Audio('Sound4.mp3');
 shipSound.loop = true;
@@ -310,6 +324,7 @@ function jump() {
 function startGame() {
   state = 'playing';
   msgEl.textContent = '';
+  startBgMusic(true);
 }
 
 function resetGame() {
@@ -333,6 +348,7 @@ function resetGame() {
   cpId = 0;
   lastPattern = -1;
   stopWaveVideo();
+  startBgMusic(true);
   waveFade = 0;
   waveTrail = [];
   nextShip = 900;
@@ -379,6 +395,7 @@ function respawn() {
   player.w = TILE - 4; player.h = TILE - 4;
   player.y = GROUND - player.h; player.vy = 0; player.onGround = true; player.angle = 0;
   stopWaveVideo(); stopShipSound();
+  startBgMusic();
   waveFade = 0; waveTrail = []; timeScale = 1;
   speed = SPEED_INIT + Math.floor(frame / 400) * 0.5;
   snapTheme();
@@ -569,6 +586,7 @@ function spawnUfo() {
 }
 
 function setMode(m) {
+  if (m === 'cube') startBgMusic(); else pauseBgMusic();
   if (m === 'ship') startShipSound(); else stopShipSound();
   const cy = player.y + player.h / 2;
   mode = m;
@@ -1269,6 +1287,7 @@ function die() {
   state = 'dead';
   stopShipSound();
   stopWaveVideo();
+  pauseBgMusic();
   playDeathSound();
   burst(player.x + player.w / 2, player.y + player.h / 2, playerColor, 36);
   msgEl.textContent = checkpoints.length ? 'Furze: weiter ab Checkpoint' : 'Furze zum Neustart';
@@ -1282,6 +1301,9 @@ function update() {
   waveFade = Math.max(0, Math.min(1, waveFade + ((mode === 'wave' && state === 'playing') ? 0.06 : -0.06)));
   if (banner > 0) banner--;
   if (state !== 'playing') return;
+
+  // Sicherheitsnetz: Musik soll laufen, tut es aber nicht -> neu starten
+  if (musicWanted && mode === 'cube' && bgMusic.paused && frame % 30 === 0) bgMusic.play().catch(() => {});
 
   frame++;
   score = Math.floor(frame / 6);
