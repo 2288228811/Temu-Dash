@@ -108,7 +108,15 @@
     <h2>LEVEL WÄHLEN</h2>
     <button class="mbtn" id="mLevel1" type="button">Level 1<br><small>Talahon Stadt</small></button>
     <button class="mbtn" id="mLevel2" type="button">Level 2<br><small>Adams Keller</small></button>
+    <button class="mbtn" id="mLevel3" type="button">Level 3<br><small>Adams Weltall</small></button>
     <button class="mbtn alt" id="mLevelsBack" type="button">← Zurück</button>
+  </div>
+  <div class="menuView" id="mvWin" hidden>
+    <h2 id="winTitle">LEVEL GESCHAFFT!</h2>
+    <div class="help" id="winText"></div>
+    <button class="mbtn" id="mWinNext" type="button">Nächstes Level ▶</button>
+    <button class="mbtn alt" id="mWinAgain" type="button">↻ Nochmal</button>
+    <button class="mbtn alt" id="mWinMenu" type="button">☰ Levelauswahl</button>
   </div>
   <div class="menuView" id="mvSettings" hidden>
     <h2>EINSTELLUNGEN</h2>
@@ -279,9 +287,18 @@ const THEMES2 = [
   { name: 'Kaufland',    deco:'disco',     skyTop:[20,0,10],  skyBot:[70,0,30],  ground:[70,10,40], accent:[255,40,90],  spike:[0,255,255],  block:[120,20,70], edge:[255,140,190] },
   { name: 'Aldi',  deco:'city',      skyTop:[24,12,0],  skyBot:[70,36,10], ground:[80,48,16], accent:[255,140,0],  spike:[255,255,255],block:[120,70,30], edge:[230,170,110] },
 ];
+const THEMES3 = [
+  { name: 'Adams Raumschiff', deco:'disco',     skyTop:[0,0,12],   skyBot:[10,8,44],  ground:[22,18,70], accent:[0,200,255],  spike:[255,70,110], block:[50,50,120], edge:[150,170,255] },
+  { name: 'Mondbasis',        deco:'mountains', skyTop:[6,6,10],   skyBot:[40,40,52], ground:[88,88,100],accent:[230,230,255],spike:[255,90,50],  block:[110,110,130],edge:[235,235,255] },
+  { name: 'Mars',             deco:'city',      skyTop:[34,4,0],   skyBot:[110,28,8], ground:[120,40,16],accent:[255,90,40],  spike:[0,230,255],  block:[160,60,30], edge:[255,160,120] },
+  { name: 'Schwarzes Loch',   deco:'disco',     skyTop:[0,0,0],    skyBot:[26,0,40],  ground:[18,0,30],  accent:[200,0,255],  spike:[255,240,0],  block:[70,10,100], edge:[220,130,255] },
+];
+const ALL_THEMES = [THEMES1, THEMES2, THEMES3];
+const MAX_LEVEL = 3;
+const LEVEL_GOAL = 1000;   // Score, ab dem ein Level geschafft ist
 let THEMES = THEMES1;
 let level = 1;
-function setLevel(n) { level = n; THEMES = n === 2 ? THEMES2 : THEMES1; }
+function setLevel(n) { level = n; THEMES = ALL_THEMES[n - 1] || THEMES1; }
 const KEYS = ['skyTop','skyBot','ground','accent','spike','block','edge'];
 let themeIdx = 0;
 let cur = {};
@@ -371,8 +388,9 @@ syncSliders();
 // ---------- Hauptmenü ----------
 const menuPanel = document.getElementById('menuPanel');
 let inMenu = true;
-const views = { main: 'mvMain', levels: 'mvLevels', settings: 'mvSettings', help: 'mvHelp' };
+const views = { main: 'mvMain', levels: 'mvLevels', settings: 'mvSettings', help: 'mvHelp', win: 'mvWin' };
 function showView(v) {
+  if (v === 'levels') refreshLevelButtons();
   Object.entries(views).forEach(([k, id]) => document.getElementById(id).hidden = (k !== v));
   const first = document.querySelector('#' + views[v] + ' button');
   if (first) first.focus();
@@ -396,6 +414,35 @@ function closeMenuAndPlay(n = level) {
   resetGame();            // startet das gewählte Level von vorn
   banner = 100; bannerText = 'LEVEL ' + level;
 }
+// ---------- Level geschafft ----------
+const SAVE_KEY = 'temuDash.levelsDone';
+let levelsDone = {};
+try { levelsDone = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') || {}; } catch (e) {}
+const LEVEL_TITLES = { 1: 'Talahon Stadt', 2: 'Adams Keller', 3: 'Adams Weltall' };
+function refreshLevelButtons() {
+  for (let n = 1; n <= MAX_LEVEL; n++) {
+    const b = document.getElementById('mLevel' + n);
+    if (b) b.innerHTML = 'Level ' + n + (levelsDone[n] ? ' ✓' : '') + '<br><small>' + LEVEL_TITLES[n] + '</small>';
+  }
+}
+function winLevel() {
+  state = 'won';
+  holding = false;
+  pauseBgMusic(); stopShipSound(); stopWaveVideo();
+  levelsDone[level] = true;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(levelsDone)); } catch (e) {}
+  const colors = ['#00f5ff', '#ff00cc', '#ffe600', '#00ff88'];
+  for (let i = 0; i < 6; i++) burst(120 + Math.random() * 560, 60 + Math.random() * 120, colors[i % colors.length], 14);
+  document.getElementById('winTitle').textContent = 'LEVEL ' + level + ' GESCHAFFT!';
+  document.getElementById('winText').textContent = LEVEL_GOAL + ' Score erreicht!';
+  const next = document.getElementById('mWinNext');
+  next.hidden = level >= MAX_LEVEL;
+  next.textContent = 'Level ' + (level + 1) + ' ▶';
+  inMenu = true;
+  msgEl.textContent = '';
+  menuPanel.hidden = false;
+  showView('win');
+}
 function bindMenuSlider(id, valId, fmt, apply) {
   const el = document.getElementById(id), out = document.getElementById(valId);
   el.addEventListener('input', () => { apply(parseFloat(el.value)); out.textContent = fmt(parseFloat(el.value)); });
@@ -411,6 +458,10 @@ function syncMenuSliders() {
 document.getElementById('mPlay').addEventListener('click', () => showView('levels'));
 document.getElementById('mLevel1').addEventListener('click', () => closeMenuAndPlay(1));
 document.getElementById('mLevel2').addEventListener('click', () => closeMenuAndPlay(2));
+document.getElementById('mLevel3').addEventListener('click', () => closeMenuAndPlay(3));
+document.getElementById('mWinNext').addEventListener('click', () => closeMenuAndPlay(Math.min(level + 1, MAX_LEVEL)));
+document.getElementById('mWinAgain').addEventListener('click', () => closeMenuAndPlay(level));
+document.getElementById('mWinMenu').addEventListener('click', () => showView('levels'));
 document.getElementById('mLevelsBack').addEventListener('click', () => showView('main'));
 document.getElementById('mSettings').addEventListener('click', () => { syncMenuSliders(); showView('settings'); });
 document.getElementById('mHelp').addEventListener('click', () => showView('help'));
@@ -438,6 +489,7 @@ function startGame() {
 }
 
 function resetGame() {
+  invincibleMs = 0;
   state = 'playing';
   score = 0;
   speed = SPEED_INIT;
@@ -477,6 +529,11 @@ function resetGame() {
   msgEl.textContent = '';
 }
 
+// ---------- Unsterblichkeit nach Checkpoint ----------
+const INVINCIBLE_MS = 5000;
+let invincibleMs = 0;      // verbleibende Unsterblichkeit in ms
+let lastUpdateT = 0;
+
 // ---------- Checkpoints (jeder darf nur einmal benutzt werden) ----------
 function saveCheckpoint(cp) {
   checkpoints.push({
@@ -512,6 +569,7 @@ function respawn() {
   scoreEl.textContent = score;
   msgEl.textContent = '';
   banner = 70; bannerText = 'CHECKPOINT';
+  invincibleMs = INVINCIBLE_MS;   // 5 Sekunden unverwundbar
   burst(player.x + player.w / 2, player.y + player.h / 2, '#00ff88', 20);
 }
 
@@ -623,6 +681,44 @@ const PATTERNS2 = [
   { min:1000, f: x => { TS(x); TS(x+40); TS(x+80); ORB(x+120, GROUND-100); return 120; } },
   { min:1100, f: x => { PL(x, 260, 80); for (let i = 0; i < 5; i++) TS(x+40+i*36); return 260; } },
   { min:1200, f: x => { MSAW(x+22, GROUND-80, 22, 55, 0); MSAW(x+170, GROUND-80, 22, 55, Math.PI); LASER(x+400, 30); return 412; } },
+];
+// ----- Level 3: neue Hindernisse -----
+// Fallender Spike: hängt an der Decke (wackelt) und stürzt herab, wenn man näher kommt. Danach bleibt er als normale Spitze liegen.
+const FS = x => obstacles.push({ type:'fspike', x, w:36, h:40, y:6, fell:false, fvy:0 });
+// Säge, die waagerecht hin und her fährt (amp = Ausschlag, ph = Phase)
+const HS = (cx, cy, r, amp, ph) => obstacles.push({ type:'saw', x:cx-r, y:cy-r, w:2*r, h:2*r, r, hamp:amp, ph });
+
+const ROCKET = (x, y) => obstacles.push({ type:'rocket', x, y, w:46, h:20, rvx:0.6 });
+const METEOR = x => obstacles.push({ type:'meteor', x, y:-40, w:28, h:28, fell:false });
+const ROTOR  = (cx, cy, len, ph) => obstacles.push({ type:'rotor', x:cx-len, y:cy-len, w:2*len, h:2*len, len, ph });
+const LOWG   = (x, w) => obstacles.push({ type:'lowg', x, w, y:GROUND-210, h:210 });
+
+const PATTERNS3 = [
+  { min:0,    f: x => { FS(x); return 36; } },
+  { min:0,    f: x => { S(x); FS(x+250); return 286; } },
+  { min:0,    f: x => { HS(x+90, GROUND-22, 22, 70, 0); return 190; } },
+  { min:100,  f: x => { B(x,1); FS(x+200); return 236; } },
+  { min:200,  f: x => { FS(x); FS(x+260); return 296; } },
+  { min:250,  f: x => { LASER(x, 0); FS(x+300); return 336; } },
+  { min:300,  f: x => { HS(x+90, GROUND-22, 22, 70, 0); HS(x+330, GROUND-22, 22, 70, Math.PI); return 420; } },
+  { min:400,  f: x => { TS(x); HS(x+320, GROUND-22, 22, 60, 0); return 420; } },
+  { min:500,  f: x => { CR(x, 0); FS(x+260); return 296; } },
+  { min:600,  f: x => { MSAW(x+22, GROUND-80, 22, 55, 0); HS(x+270, GROUND-22, 22, 60, 0); return 360; } },
+  { min:700,  f: x => { FS(x); FS(x+36); return 72; } },
+  { min:800,  f: x => { PIT(x, 200); FS(x+420); return 456; } },
+  { min:900,  f: x => { HS(x+90, GROUND-22, 22, 70, 0); FS(x+330); TS(x+560); return 600; } },
+  { min:1000, f: x => { LASER(x, 0); HS(x+270, GROUND-22, 22, 50, 1); return 380; } },
+  { min:1100, f: x => { FS(x); CR(x+300, 0); LASER(x+520, 40); return 572; } },
+  { min:1200, f: x => { TS(x); TS(x+40); FS(x+330); return 366; } },
+  { min:1300, f: x => { TS(x); TS(x+40); TS(x+80); ORB(x+120, GROUND-100); FS(x+400); return 436; } },
+  { min:1500, f: x => { HS(x+90, GROUND-22, 22, 70, 0); HS(x+300, GROUND-22, 22, 70, Math.PI); FS(x+560); return 600; } },
+  { min:150,  f: x => { ROCKET(x+500, GROUND-28); return 40; } },
+  { min:250,  f: x => { METEOR(x); METEOR(x+260); return 300; } },
+  { min:350,  f: x => { S(x+60); ROTOR(x+60, GROUND-120, 55, 0); return 130; } },
+  { min:450,  f: x => { LOWG(x+60, 300); S(x+200); S(x+380); return 416; } },
+  { min:600,  f: x => { ROCKET(x+520, GROUND-85); return 40; } },
+  { min:800,  f: x => { S(x+60); ROTOR(x+60, GROUND-120, 55, 0); S(x+280); ROTOR(x+280, GROUND-120, 55, Math.PI/2); return 350; } },
+  { min:1000, f: x => { METEOR(x); ROCKET(x+560, GROUND-28); return 40; } },
 ];
 let lastPattern = -1;
 
@@ -841,7 +937,7 @@ function spawnPattern() {
     return;
   }
 
-  const PATS = level === 2 ? PATTERNS2 : PATTERNS;
+  const PATS = level === 3 ? PATTERNS3 : level === 2 ? PATTERNS2 : PATTERNS;
   const avail = PATS.map((p, i) => i)
     .filter(i => PATS[i].min <= frame && i !== lastPattern);
 
@@ -1301,10 +1397,68 @@ function drawPlayer() {
   ctx.restore();
 }
 
+function drawWarn(x, y) {
+  ctx.save();
+  ctx.globalAlpha = frame % 10 < 5 ? 1 : 0.4;
+  ctx.fillStyle = '#ff3355'; ctx.shadowColor = '#ff3355'; ctx.shadowBlur = 12;
+  ctx.beginPath(); ctx.moveTo(x - 24, y); ctx.lineTo(x, y - 14); ctx.lineTo(x, y + 14); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawRocket(o) {
+  ctx.save();
+  ctx.shadowColor = rgb(cur.spike); ctx.shadowBlur = 14;
+  ctx.fillStyle = '#d8d8e8'; ctx.fillRect(o.x + 12, o.y + 3, o.w - 12, o.h - 6);
+  ctx.fillStyle = rgb(cur.spike);
+  ctx.beginPath(); ctx.moveTo(o.x, o.y + o.h / 2); ctx.lineTo(o.x + 14, o.y + 2); ctx.lineTo(o.x + 14, o.y + o.h - 2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = frame % 4 < 2 ? '#ffb000' : '#ff5500';
+  ctx.beginPath(); ctx.moveTo(o.x + o.w, o.y + 4); ctx.lineTo(o.x + o.w + 18, o.y + o.h / 2); ctx.lineTo(o.x + o.w, o.y + o.h - 4); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawMeteor(o) {
+  const cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+  if (!o.fell) { drawWarn(Math.min(cx, W - 14) + 10, 22); return; }
+  ctx.save();
+  ctx.shadowColor = '#ff8800'; ctx.shadowBlur = 20;
+  ctx.fillStyle = 'rgba(255,140,0,0.45)';
+  ctx.beginPath(); ctx.moveTo(cx - 12, cy); ctx.lineTo(cx + 40, cy - 70); ctx.lineTo(cx + 12, cy); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#ff5500'; ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffd060'; ctx.beginPath(); ctx.arc(cx - 3, cy - 3, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+function drawRotor(o) {
+  const cx = o.x + o.len, cy = o.y + o.len, a = frame * 0.05 + o.ph;
+  ctx.save();
+  ctx.shadowColor = rgb(cur.spike); ctx.shadowBlur = 16;
+  ctx.strokeStyle = rgb(cur.spike); ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - Math.cos(a) * o.len, cy - Math.sin(a) * o.len);
+  ctx.lineTo(cx + Math.cos(a) * o.len, cy + Math.sin(a) * o.len);
+  ctx.stroke();
+  ctx.fillStyle = '#d8d8e8'; ctx.beginPath(); ctx.arc(cx, cy, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+function drawLowG(o) {
+  ctx.save();
+  const g = ctx.createLinearGradient(0, o.y, 0, GROUND);
+  g.addColorStop(0, 'rgba(120,200,255,0)'); g.addColorStop(1, 'rgba(120,200,255,0.28)');
+  ctx.fillStyle = g; ctx.fillRect(o.x, o.y, o.w, o.h);
+  ctx.strokeStyle = 'rgba(180,230,255,0.6)'; ctx.lineWidth = 2;
+  for (let ax = o.x + 20; ax < o.x + o.w; ax += 40) {
+    const ay = GROUND - ((frame * 1.5 + ax) % 160);
+    ctx.beginPath(); ctx.moveTo(ax - 6, ay + 8); ctx.lineTo(ax, ay); ctx.lineTo(ax + 6, ay + 8); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawObstacles() {
   obstacles.forEach(obs => {
     if (obs.type === 'pit') return;
+    if (obs.type === 'rocket' && obs.x > W) { drawWarn(W - 10, obs.y + obs.h / 2); return; }
     if (obs.x > W + 60) return;
+    if (obs.type === 'rocket') { drawRocket(obs); return; }
+    if (obs.type === 'rotor')  { drawRotor(obs);  return; }
+    if (obs.type === 'lowg')   { drawLowG(obs);   return; }
+    if (obs.type === 'meteor') { drawMeteor(obs); return; }
     if (obs.type === 'portal') { drawPortal(obs); return; }
     if (obs.type === 'pillar') { drawPillar(obs); return; }
     if (obs.type === 'laser') { drawLaser(obs); return; }
@@ -1312,7 +1466,8 @@ function drawObstacles() {
     if (obs.type === 'wcol') { drawWcol(obs); return; }
     if (obs.type === 'checkpoint') { drawCheckpoint(obs); return; }
     ctx.save();
-    if (obs.type === 'spike' || obs.type === 'cspike') {
+    if (obs.type === 'spike' || obs.type === 'cspike' || obs.type === 'fspike') {
+      if (obs.type === 'fspike' && !obs.fell) ctx.translate(frame % 4 < 2 ? -1.5 : 1.5, 0);   // wackelt vor dem Fall
       ctx.shadowColor = rgb(cur.spike);
       ctx.shadowBlur = 14;
       ctx.fillStyle = rgb(cur.spike);
@@ -1466,11 +1621,12 @@ function aabb(a, b) {
 function hazardBox(obs) {
   if (obs.type === 'laser') return laserOn(obs) ? { x: obs.x, y: obs.y, w: obs.w, h: obs.h } : { x: -9999, y: -9999, w: 0, h: 0 };
   if (obs.type === 'spike') return { x: obs.x + 8, y: obs.y + 10, w: obs.w - 16, h: obs.h - 10 };
-  if (obs.type === 'cspike') return { x: obs.x + 8, y: obs.y, w: obs.w - 16, h: obs.h - 10 };
+  if (obs.type === 'cspike' || obs.type === 'fspike') return { x: obs.x + 8, y: obs.y, w: obs.w - 16, h: obs.h - 10 };
   if (obs.type === 'saw') { const m = obs.r * 0.3; return { x: obs.x + m, y: obs.y + m, w: obs.w - 2*m, h: obs.h - 2*m }; }
   return obs;
 }
 function die() {
+  if (invincibleMs > 0) return;
   state = 'dead';
   stopShipSound();
   stopWaveVideo();
@@ -1482,6 +1638,9 @@ function die() {
 
 
 function update() {
+  const nowT = performance.now();
+  const dtMs = Math.min(nowT - (lastUpdateT || nowT), 50);   // Pause/Tab-Wechsel nicht mitzählen
+  lastUpdateT = nowT;
   if (paused) return; // Pause: alles einfrieren
   updateTheme();
   updateParticles();
@@ -1492,9 +1651,11 @@ function update() {
   // Sicherheitsnetz: Musik soll laufen, tut es aber nicht -> neu starten
   if (musicWanted && mode === 'cube' && bgMusic.paused && frame % 30 === 0) bgMusic.play().catch(() => {});
 
+  if (invincibleMs > 0) invincibleMs = Math.max(0, invincibleMs - dtMs);
   frame++;
   score = Math.floor(frame / 6);
   scoreEl.textContent = score;
+  if (score >= LEVEL_GOAL) { winLevel(); return; }
   if (orbBuf > 0) orbBuf--;
 
   timeScale += ((mode === 'wave' ? WAVE_TIME : 1) - timeScale) * 0.08;
@@ -1527,6 +1688,30 @@ function update() {
     obs.x -= speed;
     if (obs.amp) obs.y = obs.by + Math.sin(frame * 0.07 + obs.ph) * obs.amp;
     if (obs.type === 'crusher') obs.h = obs.base + (Math.sin(frame * 0.06 + obs.ph) + 1) / 2 * obs.swing;
+    if (obs.hamp) {                       // waagerechte Säge
+      const off = Math.sin(frame * 0.06 + obs.ph) * obs.hamp;
+      obs.x += off - (obs.hoff || 0);
+      obs.hoff = off;
+    }
+    if (obs.type === 'fspike') {          // fallender Spike
+      if (!obs.fell && obs.x - player.x < speed * 22 + 190) obs.fell = true;
+      if (obs.fell) {
+        obs.fvy += 0.9;
+        obs.y += obs.fvy;
+        if (obs.y + obs.h >= GROUND) { obs.y = GROUND - obs.h; obs.type = 'spike'; }
+      }
+    }
+    if (obs.rvx) obs.x -= speed * obs.rvx;
+    if (obs.type === 'meteor') {
+      if (!obs.fell && obs.x - player.x < 200 + 31 * (speed + 3)) obs.fell = true;
+      if (obs.fell) {
+        obs.y += 9; obs.x -= 3;
+        if (obs.y + obs.h >= GROUND) {
+          burst(obs.x + 14, GROUND - 10, '#ff8800', 14);
+          obs.type = 'spike'; obs.w = 36; obs.h = 40; obs.y = GROUND - 40;
+        }
+      }
+    }
   });
   obstacles = obstacles.filter(obs => obs.x + obs.w > -10);
   spawnDist += speed;
@@ -1553,14 +1738,17 @@ function update() {
 
   // Physik
   const prevBottom = player.y + player.h;
-  player.vy += GRAVITY * gravMul;
+  const pcx = player.x + player.w / 2;
+  const lowG = obstacles.some(o => o.type === 'lowg' && pcx > o.x && pcx < o.x + o.w);
+  player.vy += GRAVITY * gravMul * (lowG ? 0.55 : 1);
   player.y += player.vy;
+  if (player.y < 8) { player.y = 8; if (player.vy < 0) player.vy = 0; }
   player.onGround = false;
   const bottom = player.y + player.h;
 
   // Landung auf Boden (nicht über Lücke)
   const cx = player.x + player.w / 2;
-  const overPit = obstacles.some(o => o.type === 'pit' && cx > o.x && cx < o.x + o.w);
+  const overPit = invincibleMs <= 0 && obstacles.some(o => o.type === 'pit' && cx > o.x && cx < o.x + o.w);
   if (!overPit && player.vy >= 0 && bottom >= GROUND && prevBottom <= GROUND + 10) {
     player.y = GROUND - player.h;
     player.vy = 0;
@@ -1597,7 +1785,10 @@ function update() {
   }
 
   // Tod durch Absturz
-  if (player.y > H + 20) { die(); return; }
+  if (player.y > H + 20) {
+    if (invincibleMs > 0) { player.y = GROUND - player.h; player.vy = 0; player.onGround = true; }
+    else { die(); return; }
+  }
 
   // Kollisionen
   const pHit = { x: player.x + 3, y: player.y + 3, w: player.w - 6, h: player.h - 6 };
@@ -1641,7 +1832,18 @@ function update() {
       }
       continue;
     }
-    if (aabb(pHit, hazardBox(obs))) { die(); return; }
+    if (obs.type === 'lowg') continue;
+    if (obs.type === 'rotor') {
+      const rcx = obs.x + obs.len, rcy = obs.y + obs.len, a = frame * 0.05 + obs.ph;
+      let hit = false;
+      for (let t = -1; t <= 1.01; t += 0.25) {
+        const px = rcx + Math.cos(a) * obs.len * t, py = rcy + Math.sin(a) * obs.len * t;
+        if (px > pHit.x - 4 && px < pHit.x + pHit.w + 4 && py > pHit.y - 4 && py < pHit.y + pHit.h + 4) hit = true;
+      }
+      if (hit && invincibleMs <= 0) { die(); return; }
+      continue;
+    }
+    if (invincibleMs <= 0 && aabb(pHit, hazardBox(obs))) { die(); return; }
   }
 }
 
@@ -1651,8 +1853,22 @@ function render() {
   drawObstacles();
   if (mode !== 'cube') drawCeiling();
   drawParticles();
-  drawPlayer();
+  if (invincibleMs > 0) {                       // blinkt, solange unsterblich
+    ctx.save();
+    ctx.globalAlpha = (Math.floor(invincibleMs / 90) % 2) ? 0.35 : 0.9;
+    drawPlayer();
+    ctx.restore();
+  } else drawPlayer();
   drawHUD();
+  if (invincibleMs > 0 && state === 'playing') {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 16px Arial Black';
+    ctx.fillStyle = '#00ff88';
+    ctx.shadowColor = '#00ff88'; ctx.shadowBlur = 10;
+    ctx.fillText(`UNSTERBLICH ${(invincibleMs / 1000).toFixed(1)}s`, W / 2, 28);
+    ctx.restore();
+  }
   if (state === 'dead') drawDeathScreen();
 }
 
