@@ -64,6 +64,7 @@
   }
   .mbtn:hover, .mbtn:focus-visible { background: rgba(255,0,204,0.55); outline: none; }
   .mbtn small { font-size: 11px; letter-spacing: 1px; opacity: 0.8; }
+  .lvgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .mbtn.alt { background: rgba(0,229,255,0.2); border-color: #0ff; box-shadow: 0 0 12px #0ff; }
   .mbtn.alt:hover { background: rgba(0,229,255,0.45); }
   .help { font-size: 13px; line-height: 1.7; text-align: center; max-width: 520px; }
@@ -106,9 +107,12 @@
   </div>
   <div class="menuView" id="mvLevels" hidden>
     <h2>LEVEL WÄHLEN</h2>
+    <div class="lvgrid">
     <button class="mbtn" id="mLevel1" type="button">Level 1<br><small>Talahon Stadt</small></button>
     <button class="mbtn" id="mLevel2" type="button">Level 2<br><small>Adams Keller</small></button>
     <button class="mbtn" id="mLevel3" type="button">Level 3<br><small>Adams Weltall</small></button>
+    <button class="mbtn" id="mLevel4" type="button">Level 4<br><small>Adams Hölle</small></button>
+    </div>
     <button class="mbtn alt" id="mLevelsBack" type="button">← Zurück</button>
   </div>
   <div class="menuView" id="mvWin" hidden>
@@ -293,8 +297,14 @@ const THEMES3 = [
   { name: 'Mars',             deco:'city',      skyTop:[34,4,0],   skyBot:[110,28,8], ground:[120,40,16],accent:[255,90,40],  spike:[0,230,255],  block:[160,60,30], edge:[255,160,120] },
   { name: 'Schwarzes Loch',   deco:'disco',     skyTop:[0,0,0],    skyBot:[26,0,40],  ground:[18,0,30],  accent:[200,0,255],  spike:[255,240,0],  block:[70,10,100], edge:[220,130,255] },
 ];
-const ALL_THEMES = [THEMES1, THEMES2, THEMES3];
-const MAX_LEVEL = 3;
+const THEMES4 = [
+  { name: 'Adams Hölle',   deco:'city',      skyTop:[30,0,0],  skyBot:[90,8,0],   ground:[110,20,0], accent:[255,60,0],  spike:[255,220,0], block:[90,20,10], edge:[255,120,60] },
+  { name: 'Lavasee',       deco:'mountains', skyTop:[40,0,0],  skyBot:[120,24,0], ground:[140,30,0], accent:[255,140,0], spike:[0,255,220], block:[110,30,0], edge:[255,170,60] },
+  { name: 'Glitch Matrix', deco:'disco',     skyTop:[0,10,0],  skyBot:[0,40,10],  ground:[0,50,10],  accent:[0,255,70],  spike:[255,0,200], block:[0,80,30],  edge:[120,255,150] },
+  { name: 'Adams Finale',  deco:'disco',     skyTop:[20,0,30], skyBot:[80,0,60],  ground:[90,0,70],  accent:[255,0,140], spike:[255,255,0], block:[110,0,90], edge:[255,120,220] },
+];
+const ALL_THEMES = [THEMES1, THEMES2, THEMES3, THEMES4];
+const MAX_LEVEL = 4;
 const LEVEL_GOAL = 1000;   // Score, ab dem ein Level geschafft ist
 let THEMES = THEMES1;
 let level = 1;
@@ -418,7 +428,7 @@ function closeMenuAndPlay(n = level) {
 const SAVE_KEY = 'temuDash.levelsDone';
 let levelsDone = {};
 try { levelsDone = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') || {}; } catch (e) {}
-const LEVEL_TITLES = { 1: 'Talahon Stadt', 2: 'Adams Keller', 3: 'Adams Weltall' };
+const LEVEL_TITLES = { 1: 'Talahon Stadt', 2: 'Adams Keller', 3: 'Adams Weltall', 4: 'Adams Hölle' };
 function refreshLevelButtons() {
   for (let n = 1; n <= MAX_LEVEL; n++) {
     const b = document.getElementById('mLevel' + n);
@@ -459,6 +469,7 @@ document.getElementById('mPlay').addEventListener('click', () => showView('level
 document.getElementById('mLevel1').addEventListener('click', () => closeMenuAndPlay(1));
 document.getElementById('mLevel2').addEventListener('click', () => closeMenuAndPlay(2));
 document.getElementById('mLevel3').addEventListener('click', () => closeMenuAndPlay(3));
+document.getElementById('mLevel4').addEventListener('click', () => closeMenuAndPlay(4));
 document.getElementById('mWinNext').addEventListener('click', () => closeMenuAndPlay(Math.min(level + 1, MAX_LEVEL)));
 document.getElementById('mWinAgain').addEventListener('click', () => closeMenuAndPlay(level));
 document.getElementById('mWinMenu').addEventListener('click', () => showView('levels'));
@@ -720,6 +731,42 @@ const PATTERNS3 = [
   { min:800,  f: x => { S(x+60); ROTOR(x+60, GROUND-120, 55, 0); S(x+280); ROTOR(x+280, GROUND-120, 55, Math.PI/2); return 350; } },
   { min:1000, f: x => { METEOR(x); ROCKET(x+560, GROUND-28); return 40; } },
 ];
+
+// ----- Level 4: neue Hindernisse -----
+// Pendel von der Decke: Kugel schwingt, am Boden bleibt man sicher, Springer werden getroffen
+const PEND = (cx, ph) => obstacles.push({ type:'pendel', x:cx-140, y:0, w:280, h:0, len:170, ph });
+const pendBall = o => { const a = Math.sin(frame * 0.05 + o.ph) * 0.95; return { px:o.x + 140, x:o.x + 140 + Math.sin(a) * o.len, y:6 + Math.cos(a) * o.len, r:16 }; };
+// Lava-Geysir: Warnung (Funken) -> Feuersäule (150 px, nicht überspringbar) -> aus
+const GEY = (x, ph) => obstacles.push({ type:'geyser', x, w:34, h:150, y:GROUND-150, ph });
+const geyserOn = o => { const t = (frame + o.ph) % 130; return t >= 60 && t < 100; };
+// Verfolger-Mine: folgt deiner Höhe, bis sie dicht vor dir ist
+const MINE = x => obstacles.push({ type:'mine', x, y:GROUND-124, w:28, h:28 });
+// Presse: hängt an der Decke, fällt kurz vor dir und bleibt als Block liegen (drüberspringen)
+const PRESS = x => obstacles.push({ type:'press', x, y:8, w:50, h:50, fell:false, fvy:0 });
+
+const PATTERNS4 = [
+  { min:0,    f: x => { PEND(x+140, 0); return 280; } },
+  { min:0,    f: x => { GEY(x, 0); return 34; } },
+  { min:0,    f: x => { PRESS(x); return 50; } },
+  { min:100,  f: x => { S(x); GEY(x+250, 40); return 290; } },
+  { min:150,  f: x => { PRESS(x); S(x+280); return 320; } },
+  { min:200,  f: x => { MINE(x); return 30; } },
+  { min:250,  f: x => { GEY(x, 0); GEY(x+260, 50); return 300; } },
+  { min:300,  f: x => { PEND(x+140, 0); S(x+320); S(x+356); return 392; } },
+  { min:400,  f: x => { MINE(x); S(x+300); return 340; } },
+  { min:450,  f: x => { PRESS(x); PEND(x+400, 2); return 560; } },
+  { min:500,  f: x => { TS(x); GEY(x+220, 0); return 260; } },
+  { min:600,  f: x => { MINE(x); MINE(x+280); return 320; } },
+  { min:700,  f: x => { GEY(x, 0); PRESS(x+260); return 320; } },
+  { min:800,  f: x => { PEND(x+140, 0); PEND(x+420, Math.PI); return 560; } },
+  { min:900,  f: x => { ROTOR(x+60, GROUND-120, 55, 0); GEY(x+260, 30); return 300; } },
+  { min:1000, f: x => { PRESS(x); MINE(x+260); S(x+520); return 560; } },
+  { min:1100, f: x => { HS(x+90, GROUND-22, 22, 70, 0); PEND(x+400, 1); return 540; } },
+  { min:1200, f: x => { LOWG(x+60, 300); GEY(x+200, 0); S(x+360); return 400; } },
+  { min:1400, f: x => { GEY(x, 0); GEY(x+250, 40); GEY(x+500, 80); return 540; } },
+  { min:1500, f: x => { METEOR(x); PEND(x+420, 0); return 560; } },
+];
+
 let lastPattern = -1;
 
 // Gemeinsamer Anfang und Ende für Spezial-Abschnitte
@@ -937,7 +984,7 @@ function spawnPattern() {
     return;
   }
 
-  const PATS = level === 3 ? PATTERNS3 : level === 2 ? PATTERNS2 : PATTERNS;
+  const PATS = level === 4 ? PATTERNS4 : level === 3 ? PATTERNS3 : level === 2 ? PATTERNS2 : PATTERNS;
   const avail = PATS.map((p, i) => i)
     .filter(i => PATS[i].min <= frame && i !== lastPattern);
 
@@ -1450,6 +1497,81 @@ function drawLowG(o) {
   ctx.restore();
 }
 
+function drawPendel(o) {
+  const b = pendBall(o);
+  ctx.save();
+  ctx.shadowColor = rgb(cur.spike); ctx.shadowBlur = 14;
+  ctx.strokeStyle = '#9a9aaa'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(b.px, 6); ctx.lineTo(b.x, b.y); ctx.stroke();
+  ctx.fillStyle = '#555'; ctx.beginPath(); ctx.arc(b.px, 6, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#d8d8e8'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = rgb(cur.spike);
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4;
+    ctx.beginPath();
+    ctx.moveTo(b.x + Math.cos(a - 0.2) * b.r, b.y + Math.sin(a - 0.2) * b.r);
+    ctx.lineTo(b.x + Math.cos(a) * (b.r + 9), b.y + Math.sin(a) * (b.r + 9));
+    ctx.lineTo(b.x + Math.cos(a + 0.2) * b.r, b.y + Math.sin(a + 0.2) * b.r);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function drawGeyser(o) {
+  const t = (frame + o.ph) % 130, on = t >= 60 && t < 100, warn = t >= 30 && t < 60;
+  const cx = o.x + o.w / 2;
+  ctx.save();
+  ctx.shadowColor = '#ff6a00'; ctx.shadowBlur = on ? 24 : 8;
+  if (on) {
+    const g = ctx.createLinearGradient(0, o.y, 0, GROUND);
+    g.addColorStop(0, 'rgba(255,220,0,0.9)'); g.addColorStop(1, 'rgba(255,70,0,0.95)');
+    ctx.fillStyle = g;
+    ctx.fillRect(o.x + 2 + Math.sin(frame * 0.8) * 2, o.y, o.w - 4, o.h);
+  } else if (warn) {
+    ctx.fillStyle = '#ff9a30';
+    for (let i = 0; i < 4; i++) {
+      const fy = GROUND - 8 - ((frame * 2 + i * 17) % 40);
+      ctx.fillRect(cx - 10 + ((i * 7) % 20), fy, 4, 4);
+    }
+  }
+  ctx.fillStyle = '#3a3a48'; ctx.fillRect(o.x - 4, GROUND - 8, o.w + 8, 8);
+  ctx.fillStyle = on || warn ? '#ff6a00' : '#662200'; ctx.fillRect(o.x + 6, GROUND - 8, o.w - 12, 3);
+  ctx.restore();
+}
+function drawMine(o) {
+  const cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(frame * 0.05);
+  ctx.shadowColor = '#ff3355'; ctx.shadowBlur = 16;
+  ctx.fillStyle = '#9a9aaa';
+  for (let i = 0; i < 8; i++) {
+    ctx.save(); ctx.rotate(i * Math.PI / 4);
+    ctx.beginPath(); ctx.moveTo(-4, -11); ctx.lineTo(0, -19); ctx.lineTo(4, -11); ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = '#44444f'; ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = frame % 20 < 10 ? '#ff3355' : '#661020';
+  ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+function drawPress(o) {
+  ctx.save();
+  if (!o.fell) {
+    ctx.fillStyle = 'rgba(255,50,50,' + (frame % 10 < 5 ? 0.5 : 0.15) + ')';
+    ctx.beginPath(); ctx.ellipse(o.x + o.w / 2, GROUND - 3, 26, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.translate(frame % 4 < 2 ? -1.5 : 1.5, 0);
+  }
+  ctx.shadowColor = rgb(cur.edge); ctx.shadowBlur = 12;
+  ctx.fillStyle = rgb(cur.block); ctx.fillRect(o.x, o.y, o.w, o.h - 12);
+  ctx.strokeStyle = rgb(cur.edge); ctx.lineWidth = 2; ctx.strokeRect(o.x + 1, o.y + 1, o.w - 2, o.h - 14);
+  ctx.fillStyle = rgb(cur.spike);
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    ctx.moveTo(o.x + i * 10, o.y + o.h - 12); ctx.lineTo(o.x + i * 10 + 5, o.y + o.h); ctx.lineTo(o.x + i * 10 + 10, o.y + o.h - 12);
+  }
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawObstacles() {
   obstacles.forEach(obs => {
     if (obs.type === 'pit') return;
@@ -1459,6 +1581,10 @@ function drawObstacles() {
     if (obs.type === 'rotor')  { drawRotor(obs);  return; }
     if (obs.type === 'lowg')   { drawLowG(obs);   return; }
     if (obs.type === 'meteor') { drawMeteor(obs); return; }
+    if (obs.type === 'pendel') { drawPendel(obs); return; }
+    if (obs.type === 'geyser') { drawGeyser(obs); return; }
+    if (obs.type === 'mine')   { drawMine(obs);   return; }
+    if (obs.type === 'press')  { drawPress(obs);  return; }
     if (obs.type === 'portal') { drawPortal(obs); return; }
     if (obs.type === 'pillar') { drawPillar(obs); return; }
     if (obs.type === 'laser') { drawLaser(obs); return; }
@@ -1619,6 +1745,7 @@ function aabb(a, b) {
 }
 
 function hazardBox(obs) {
+  if (obs.type === 'geyser') return geyserOn(obs) ? { x: obs.x + 4, y: obs.y, w: obs.w - 8, h: obs.h } : { x: -9999, y: -9999, w: 0, h: 0 };
   if (obs.type === 'laser') return laserOn(obs) ? { x: obs.x, y: obs.y, w: obs.w, h: obs.h } : { x: -9999, y: -9999, w: 0, h: 0 };
   if (obs.type === 'spike') return { x: obs.x + 8, y: obs.y + 10, w: obs.w - 16, h: obs.h - 10 };
   if (obs.type === 'cspike' || obs.type === 'fspike') return { x: obs.x + 8, y: obs.y, w: obs.w - 16, h: obs.h - 10 };
@@ -1702,6 +1829,20 @@ function update() {
       }
     }
     if (obs.rvx) obs.x -= speed * obs.rvx;
+    if (obs.type === 'mine' && obs.x < W && obs.x > player.x + 90) {
+      const d = (player.y + player.h / 2 - obs.h / 2) - obs.y;
+      obs.y += Math.max(-1.8, Math.min(1.8, d));
+    }
+    if (obs.type === 'press') {
+      if (!obs.fell && obs.x - player.x < 130 + 15 * speed) obs.fell = true;
+      if (obs.fell) {
+        obs.y += 12;
+        if (obs.y + obs.h >= GROUND) {
+          burst(obs.x + 25, GROUND - 6, '#aaaaaa', 14);
+          obs.type = 'block'; obs.solid = true; obs.y = GROUND - obs.h;
+        }
+      }
+    }
     if (obs.type === 'meteor') {
       if (!obs.fell && obs.x - player.x < 200 + 31 * (speed + 3)) obs.fell = true;
       if (obs.fell) {
@@ -1833,6 +1974,12 @@ function update() {
       continue;
     }
     if (obs.type === 'lowg') continue;
+    if (obs.type === 'pendel') {
+      const b = pendBall(obs);
+      const nx = Math.max(pHit.x, Math.min(b.x, pHit.x + pHit.w)), ny = Math.max(pHit.y, Math.min(b.y, pHit.y + pHit.h));
+      if (invincibleMs <= 0 && (nx - b.x) ** 2 + (ny - b.y) ** 2 < (b.r - 2) ** 2) { die(); return; }
+      continue;
+    }
     if (obs.type === 'rotor') {
       const rcx = obs.x + obs.len, rcy = obs.y + obs.len, a = frame * 0.05 + obs.ph;
       let hit = false;
