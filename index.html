@@ -735,6 +735,15 @@ const METEOR = x => obstacles.push({ type:'meteor', x, y:-40, w:28, h:28, fell:f
 const ROTOR  = (cx, cy, len, ph) => obstacles.push({ type:'rotor', x:cx-len, y:cy-len, w:2*len, h:2*len, len, ph });
 const LOWG   = (x, w) => obstacles.push({ type:'lowg', x, w, y:GROUND-210, h:210 });
 
+// Jump-Pad + Spike + Rotor: das Pad schleudert dich genau über den Rotor (Scheitelpunkt ~20 Frames nach dem Start)
+const PADROT = (x, ph) => {
+  const cx = x + Math.round(20 * speed) - 15;      // Rotor-Mitte liegt dort, wo man in der Pad-Flugbahn gerade am höchsten ist
+  PAD(x);
+  S(cx - 18);
+  ROTOR(cx, GROUND - 95, 30, ph);
+  return Math.round(41 * speed) + 60;              // Breite bis zur Landung
+};
+
 const PATTERNS3 = [
   { min:0,    f: x => { FS(x); return 36; } },
   { min:0,    f: x => { S(x); FS(x+250); return 286; } },
@@ -756,10 +765,10 @@ const PATTERNS3 = [
   { min:1500, f: x => { HS(x+90, GROUND-22, 22, 70, 0); HS(x+300, GROUND-22, 22, 70, Math.PI); FS(x+560); return 600; } },
   { min:150,  f: x => { ROCKET(x+500, GROUND-28); return 40; } },
   { min:250,  f: x => { METEOR(x); METEOR(x+260); return 300; } },
-  { min:350,  f: x => { S(x+60); ROTOR(x+60, GROUND-120, 55, 0); return 130; } },
+  { min:350,  f: x => PADROT(x, 0) },
   { min:450,  f: x => { LOWG(x+60, 300); S(x+200); S(x+380); return 416; } },
   { min:600,  f: x => { ROCKET(x+520, GROUND-85); return 40; } },
-  { min:800,  f: x => { S(x+60); ROTOR(x+60, GROUND-120, 55, 0); S(x+280); ROTOR(x+280, GROUND-120, 55, Math.PI/2); return 350; } },
+  { min:800,  f: x => { const w1 = PADROT(x, 0); return w1 + 60 + PADROT(x + w1 + 60, Math.PI / 2); } },
   { min:1000, f: x => { METEOR(x); ROCKET(x+560, GROUND-28); return 40; } },
 ];
 
