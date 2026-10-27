@@ -65,6 +65,7 @@
   .mbtn:hover, .mbtn:focus-visible { background: rgba(255,0,204,0.55); outline: none; }
   .mbtn small { font-size: 11px; letter-spacing: 1px; opacity: 0.8; }
   .lvgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mbtn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; background: rgba(120,120,140,0.2); border-color: #888; }
   .mbtn.alt { background: rgba(0,229,255,0.2); border-color: #0ff; box-shadow: 0 0 12px #0ff; }
   .mbtn.alt:hover { background: rgba(0,229,255,0.45); }
   .help { font-size: 13px; line-height: 1.7; text-align: center; max-width: 520px; }
@@ -127,6 +128,7 @@
     <div class="row"><label for="mMusic">Musik</label><input type="range" id="mMusic" min="0" max="1" step="0.05" value="1"><span class="val" id="mMusicVal">100%</span></div>
     <div class="row"><label for="mSpeed">Speed</label><input type="range" id="mSpeed" min="0.5" max="2" step="0.05" value="1"><span class="val" id="mSpeedVal">1.00x</span></div>
     <div class="row"><label for="mGrav">Gravity</label><input type="range" id="mGrav" min="0.3" max="1.7" step="0.05" value="1"><span class="val" id="mGravVal">1.00x</span></div>
+    <button class="mbtn alt" id="mReset" type="button">🗑 Fortschritt löschen</button>
     <button class="mbtn alt" id="mSetBack" type="button">← Zurück</button>
   </div>
   <div class="menuView" id="mvHelp" hidden>
@@ -417,6 +419,7 @@ function openMenu() {
   showView('main');
 }
 function closeMenuAndPlay(n = level) {
+  if (!isUnlocked(n)) { showView('levels'); return; }
   setLevel(n);
   inMenu = false;
   menuPanel.hidden = true;
@@ -428,11 +431,30 @@ function closeMenuAndPlay(n = level) {
 const SAVE_KEY = 'temuDash.levelsDone';
 let levelsDone = {};
 try { levelsDone = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') || {}; } catch (e) {}
+const UNLOCK_KEY = 'temuDash.unlocked';
+const FREE_LEVELS = 3;                 // Level 1-3 sind von Anfang an frei
+let unlocked = {};
+try { unlocked = JSON.parse(localStorage.getItem(UNLOCK_KEY) || '{}') || {}; } catch (e) {}
+Object.keys(levelsDone).forEach(n => { if (levelsDone[n]) unlocked[+n + 1] = true; });   // Fortschritt aus älteren Spielständen übernehmen
+const isUnlocked = n => n <= FREE_LEVELS || !!unlocked[n];
+function saveProgress() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(levelsDone));
+    localStorage.setItem(UNLOCK_KEY, JSON.stringify(unlocked));
+  } catch (e) {}
+}
 const LEVEL_TITLES = { 1: 'Talahon Stadt', 2: 'Adams Keller', 3: 'Adams Weltall', 4: 'Adams Hölle' };
 function refreshLevelButtons() {
   for (let n = 1; n <= MAX_LEVEL; n++) {
     const b = document.getElementById('mLevel' + n);
-    if (b) b.innerHTML = 'Level ' + n + (levelsDone[n] ? ' ✓' : '') + '<br><small>' + LEVEL_TITLES[n] + '</small>';
+    if (!b) continue;
+    if (isUnlocked(n)) {
+      b.disabled = false;
+      b.innerHTML = 'Level ' + n + (levelsDone[n] ? ' ✓' : '') + '<br><small>' + LEVEL_TITLES[n] + '</small>';
+    } else {
+      b.disabled = true;
+      b.innerHTML = '🔒 Level ' + n + '<br><small>Schaffe erst Level ' + (n - 1) + '</small>';
+    }
   }
 }
 function winLevel() {
@@ -440,11 +462,13 @@ function winLevel() {
   holding = false;
   pauseBgMusic(); stopShipSound(); stopWaveVideo();
   levelsDone[level] = true;
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(levelsDone)); } catch (e) {}
+  const newlyUnlocked = level < MAX_LEVEL && !isUnlocked(level + 1);
+  if (level < MAX_LEVEL) unlocked[level + 1] = true;
+  saveProgress();
   const colors = ['#00f5ff', '#ff00cc', '#ffe600', '#00ff88'];
   for (let i = 0; i < 6; i++) burst(120 + Math.random() * 560, 60 + Math.random() * 120, colors[i % colors.length], 14);
   document.getElementById('winTitle').textContent = 'LEVEL ' + level + ' GESCHAFFT!';
-  document.getElementById('winText').textContent = LEVEL_GOAL + ' Score erreicht!';
+  document.getElementById('winText').textContent = LEVEL_GOAL + ' Score erreicht!' + (newlyUnlocked ? '  🔓 Level ' + (level + 1) + ' freigeschaltet!' : '');
   const next = document.getElementById('mWinNext');
   next.hidden = level >= MAX_LEVEL;
   next.textContent = 'Level ' + (level + 1) + ' ▶';
@@ -476,6 +500,13 @@ document.getElementById('mWinMenu').addEventListener('click', () => showView('le
 document.getElementById('mLevelsBack').addEventListener('click', () => showView('main'));
 document.getElementById('mSettings').addEventListener('click', () => { syncMenuSliders(); showView('settings'); });
 document.getElementById('mHelp').addEventListener('click', () => showView('help'));
+document.getElementById('mReset').addEventListener('click', () => {
+  if (!confirm('Gesamten Fortschritt löschen? Level 4 wird wieder gesperrt.')) return;
+  levelsDone = {}; unlocked = {};
+  try { localStorage.removeItem(SAVE_KEY); localStorage.removeItem(UNLOCK_KEY); } catch (e) {}
+  refreshLevelButtons();
+  showView('main');
+});
 document.getElementById('mSetBack').addEventListener('click', () => showView('main'));
 document.getElementById('mHelpBack').addEventListener('click', () => showView('main'));
 document.getElementById('toMenuBtn').addEventListener('click', openMenu);
