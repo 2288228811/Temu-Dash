@@ -189,6 +189,13 @@ function pauseBgMusic() { musicWanted = false; bgMusic.pause(); }
   document.addEventListener(ev, () => {
     if (musicWanted && !paused && bgMusic.paused) bgMusic.play().catch(() => {});
   }));
+const shieldSound = new Audio('Sound6.mp3');   // Rettung
+const shieldImg = new Image();
+shieldImg.src = 'Image1.png';                 // Aussehen der Schutz-Teile
+function playShieldSound() {
+  try { shieldSound.currentTime = 0; } catch (e) {}
+  shieldSound.play().catch(() => {});
+}
 const DEATH_SOUNDS = ['Sound1.mp3', 'Sound2.mp3', 'Sound3.mp3'].map(f => new Audio(f));
 const shipSound = new Audio('Sound4.mp3');
 shipSound.loop = true;
@@ -268,6 +275,7 @@ const SPECIALS = ['ship', 'wave', 'ball', 'ufo'];
 let checkpoints = [];     // erreichte, noch unbenutzte Checkpoints (Snapshots)
 let nextCheckpoint = 600; // ab diesem Frame wird der nächste Checkpoint platziert
 let cpId = 0;
+let shields = 0;         // eingesammelte Schutz-Teile (jedes rettet einmal vor dem Tod)
 
 function shuffleSpecials() {
     for (let i = SPECIALS.length - 1; i > 0; i--) {
@@ -550,6 +558,7 @@ function resetGame() {
   checkpoints = [];
   nextCheckpoint = 600;
   cpId = 0;
+  shields = 0;
   lastPattern = -1;
   stopWaveVideo();
   startBgMusic(true);
@@ -579,7 +588,7 @@ let lastUpdateT = 0;
 // ---------- Checkpoints (jeder darf nur einmal benutzt werden) ----------
 function saveCheckpoint(cp) {
   checkpoints.push({
-    id: cp.id,
+    id: cp.id, shields,
     frame, score, themeIdx, specialIdx, nextShip, nextCheckpoint,
     lastPattern, spawnDist, spawnGap, bgOffset, colorIdx,
     obstacles: JSON.parse(JSON.stringify(obstacles))
@@ -592,7 +601,7 @@ function respawn() {
   const s = checkpoints.pop();
   if (!s) { resetGame(); return; }
   state = 'playing';
-  frame = s.frame; score = s.score; themeIdx = s.themeIdx;
+  frame = s.frame; shields = s.shields || 0; score = s.score; themeIdx = s.themeIdx;
   specialIdx = s.specialIdx; nextShip = s.nextShip; nextCheckpoint = s.nextCheckpoint;
   lastPattern = s.lastPattern; spawnDist = s.spawnDist; spawnGap = s.spawnGap;
   bgOffset = s.bgOffset; colorIdx = s.colorIdx; playerColor = PLAYER_COLORS[colorIdx];
@@ -1041,6 +1050,12 @@ function spawnPattern() {
     obstacles.push({ type:'checkpoint', id: ++cpId, x: W + 20 + width + spacing / 2 - 15,
                      y:0, w:30, h:GROUND, hit:false, used:false });
     nextCheckpoint = frame + 1100 + Math.random() * 400;
+  }
+
+  // Schutz-Teil: liegt am Boden oder schwebt in Sprunghöhe
+  if (Math.random() < 0.45) {
+    const cy = Math.random() < 0.5 ? GROUND - 24 : GROUND - 120;
+    obstacles.push({ type:'shield', x: W + 20 + width + spacing * 0.25, y: cy - 17, w:34, h:34, taken:false });
   }
 
   spawnGap = width + spacing;
@@ -1612,6 +1627,29 @@ function drawPress(o) {
   ctx.restore();
 }
 
+function drawShieldImg(x, y, size, glow) {
+  ctx.save();
+  if (glow) { ctx.shadowColor = '#00ff88'; ctx.shadowBlur = 16; }
+  if (shieldImg.complete && shieldImg.naturalWidth > 0) {
+    const sc = Math.min(size / shieldImg.naturalWidth, size / shieldImg.naturalHeight);
+    const dw = shieldImg.naturalWidth * sc, dh = shieldImg.naturalHeight * sc;
+    ctx.drawImage(shieldImg, x + (size - dw) / 2, y + (size - dh) / 2, dw, dh);
+  } else {
+    ctx.fillStyle = '#00ff88';
+    ctx.beginPath(); ctx.arc(x + size / 2, y + size / 2, size / 2 - 2, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawShield(o) {
+  const bob = Math.sin(frame * 0.1 + o.x * 0.01) * 4;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,255,136,0.18)';
+  ctx.beginPath(); ctx.arc(o.x + o.w / 2, o.y + o.h / 2 + bob, o.w / 2 + 6, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  drawShieldImg(o.x, o.y + bob, o.w, true);
+}
+
 function drawObstacles() {
   obstacles.forEach(obs => {
     if (obs.type === 'pit') return;
@@ -1625,6 +1663,7 @@ function drawObstacles() {
     if (obs.type === 'geyser') { drawGeyser(obs); return; }
     if (obs.type === 'mine')   { drawMine(obs);   return; }
     if (obs.type === 'press')  { drawPress(obs);  return; }
+    if (obs.type === 'shield') { drawShield(obs); return; }
     if (obs.type === 'portal') { drawPortal(obs); return; }
     if (obs.type === 'pillar') { drawPillar(obs); return; }
     if (obs.type === 'laser') { drawLaser(obs); return; }
@@ -1739,6 +1778,12 @@ function drawHUD() {
   ctx.font = 'bold 14px Arial Black';
   ctx.fillStyle = checkpoints.length ? '#00ff88' : 'rgba(255,255,255,0.4)';
   ctx.fillText(`Checkpoints: ${checkpoints.length}`, 12, 48);
+  const shown = Math.min(shields, 8);
+  for (let i = 0; i < shown; i++) drawShieldImg(12 + i * 26, 54, 22, false);
+  if (shields > 8) {
+    ctx.fillStyle = '#00ff88'; ctx.font = 'bold 14px Arial Black';
+    ctx.fillText('+' + (shields - 8), 12 + 8 * 26 + 2, 71);
+  }
   ctx.textAlign = 'right';
   ctx.fillStyle = rgb(cur.accent);
   ctx.font = 'bold 14px Arial Black';
@@ -1794,6 +1839,17 @@ function hazardBox(obs) {
 }
 function die() {
   if (invincibleMs > 0) return;
+  if (shields > 0) {                       // Schutz-Teil verbraucht statt zu sterben
+    shields--;
+    invincibleMs = 1200;                   // kurz unverwundbar, um das Hindernis zu passieren
+    const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+    burst(cx, cy, '#00ff66', 60);
+    burst(cx, cy, '#b6ffcf', 40);
+    burst(cx, cy, '#00cc44', 30);
+    playShieldSound();
+    banner = 50; bannerText = 'GERETTET!';
+    return;
+  }
   state = 'dead';
   stopShipSound();
   stopWaveVideo();
@@ -2010,6 +2066,14 @@ function update() {
         player.onGround = false;
         orbBuf = 0; jumpBuf = 0; jumpDelay = 0;
         burst(obs.x + obs.w / 2, obs.y + obs.h / 2, '#ffe600', 12);
+      }
+      continue;
+    }
+    if (obs.type === 'shield') {
+      if (!obs.taken && aabb(pHit, obs)) {
+        obs.taken = true; obs.x = -999;
+        shields++;
+        burst(player.x + player.w / 2, player.y + player.h / 2, '#00ff88', 10);
       }
       continue;
     }
